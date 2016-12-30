@@ -1816,6 +1816,173 @@ PVQ_INFO *get_pvq_block(PVQ_QUEUE *pvq_q) {
 }
 #endif
 
+#if CONFIG_DAALA_EC && !CONFIG_AOM_HIGHBITDEPTH && !CONFIG_PVQ
+#define CONFIG_COLLECT_RD_STATS (1)
+#else
+#undef CONFIG_COLLECT_RD_STATS
+#endif
+
+#if CONFIG_COLLECT_RD_STATS
+#include "hybrid_fwd_txfm.h"
+#include "av1/common/reconintra.h"
+
+typedef struct collect_rd_stats_args {
+  AV1_COMP *cpi;
+  int mi_row;
+  int mi_col;
+  MODE_INFO *m;
+
+  uint32_t n;
+  int32_t acc;
+  int64_t sse;
+  uint32_t rate;
+  int64_t dist;
+} collect_rd_stats_args;
+
+static void recompute_intra_diff_b(int plane, int block,
+    int blk_row, int blk_col, BLOCK_SIZE plane_bsize, TX_SIZE tx_size,
+    void *arg) {
+  collect_rd_stats_args *args;
+  AV1_COMP *cpi;
+  const AV1_COMMON *cm;
+  MACROBLOCK *x;
+  MACROBLOCKD *xd;
+  struct macroblock_plane *p;
+  PREDICTION_MODE mode;
+  YV12_BUFFER_CONFIG *src_yv12;
+  YV12_BUFFER_CONFIG *rec_yv12;
+  int tx1d_size;
+  int bwl;
+  int bhl;
+  uint8_t dst[1 << 2*(TX_SIZES + 1)];
+  int dst_stride;
+  uint8_t *src;
+  int src_stride;
+  uint8_t *rec;
+  int rec_stride;
+  int16_t *diff;
+  int diff_stride;
+  int subsampling_y;
+  int subsampling_x;
+  int px_row;
+  int px_col;
+
+  args = (collect_rd_stats_args *)arg;
+  cpi = args->cpi;
+  x = &cpi->td.mb;
+  xd = &x->e_mbd;
+  p = &x->plane[plane];
+  tx1d_size = get_tx1d_size(tx_size);
+  dst_stride = tx1d_size;
+  src_yv12 = cpi->Source;
+
+  subsampling_y = plane ? src_yv12->subsampling_y : 0;
+  subsampling_x = plane ? src_yv12->subsampling_x : 0;
+  px_row = (args->mi_row*8 >> subsampling_y) + blk_row*4;
+  px_col = (args->mi_col*8 >> subsampling_x) + blk_col*4;
+  src = plane == 0 ? src_yv12->y_buffer :
+      plane == 1 ? src_yv12->u_buffer : src_yv12->v_buffer;
+  src_stride = plane ? src_yv12->uv_stride : src_yv12->y_stride;
+  src += px_row*src_stride + px_col;
+  cm = &cpi->common;
+  rec_yv12 = get_frame_new_buffer(cm);
+  rec = plane == 0 ? rec_yv12->y_buffer :
+      plane == 1 ? rec_yv12->u_buffer : rec_yv12->v_buffer;
+  rec_stride = plane ? rec_yv12->uv_stride : rec_yv12->y_stride;
+  rec += px_row*rec_stride + px_col;
+
+  bwl = b_width_log2_lookup[plane_bsize];
+  bhl = b_height_log2_lookup[plane_bsize];
+  mode = plane == 0 ? get_y_mode(xd->mi[0], block) : xd->mi[0]->mbmi.uv_mode;
+  av1_predict_intra_block(xd, bwl, bhl, tx_size, mode,
+      rec, rec_stride, dst, dst_stride, blk_col, blk_row, plane);
+  diff_stride = 4 << bwl;
+  diff = p->src_diff + 4*(blk_row*diff_stride + blk_col);
+  aom_subtract_block(tx1d_size, tx1d_size, diff, diff_stride,
+                     src, src_stride, dst, dst_stride);
+}
+
+static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
+                               BLOCK_SIZE plane_bsize, TX_SIZE tx_size,
+                               void *arg) {
+  collect_rd_stats_args *args;
+  AV1_COMP *cpi;
+  const AV1_COMMON *cm;
+  const MACROBLOCK *x;
+  const struct macroblock_plane *p;
+  YV12_BUFFER_CONFIG *src_yv12;
+  YV12_BUFFER_CONFIG *rec_yv12;
+  const int16_t *diff;
+  int diff_stride;
+  const uint8_t *src;
+  int src_stride;
+  const uint8_t *rec;
+  int rec_stride;
+  int subsampling_y;
+  int subsampling_x;
+  int tx1d_size;
+  int px_row;
+  int px_col;
+  int plane_height;
+  int plane_width;
+  int height;
+  int width;
+  int32_t acc;
+  int64_t sse;
+  int i;
+  int j;
+  args = (collect_rd_stats_args *)arg;
+  cpi = args->cpi;
+  x = &cpi->td.mb;
+  p = &x->plane[plane];
+  src_yv12 = cpi->Source;
+  subsampling_y = plane ? src_yv12->subsampling_y : 0;
+  subsampling_x = plane ? src_yv12->subsampling_x : 0;
+  px_row = (args->mi_row*8 >> subsampling_y) + blk_row*4;
+  px_col = (args->mi_col*8 >> subsampling_x) + blk_col*4;
+  tx1d_size = get_tx1d_size(tx_size);
+  plane_height = plane ? src_yv12->uv_crop_height : src_yv12->y_crop_height;
+  plane_width = plane ? src_yv12->uv_crop_width : src_yv12->y_crop_width;
+  height = AOMMIN(px_row + tx1d_size, plane_height) - px_row;
+  width = AOMMIN(px_col + tx1d_size, plane_width) - px_col;
+  diff_stride = 4 << b_width_log2_lookup[plane_bsize];
+  diff = p->src_diff + 4*(blk_row*diff_stride + blk_col);
+  acc = 0;
+  sse = 0;
+  for (i = 0; i < height; i++) {
+    for (j = 0; j < width; j++) {
+      int d;
+      d = diff[i*diff_stride + j];
+      acc += d;
+      sse += d*d;
+    }
+  }
+  args->acc += acc;
+  args->sse += sse;
+  args->n += width*height;
+
+  src = plane == 0 ? src_yv12->y_buffer :
+    plane == 1 ? src_yv12->u_buffer : src_yv12->v_buffer;
+  src_stride = plane ? src_yv12->uv_stride : src_yv12->y_stride;
+  src += px_row*src_stride + px_col;
+  cm = &cpi->common;
+  rec_yv12 = get_frame_new_buffer(cm);
+  rec = plane == 0 ? rec_yv12->y_buffer :
+      plane == 1 ? rec_yv12->u_buffer : rec_yv12->v_buffer;
+  rec_stride = plane ? rec_yv12->uv_stride : rec_yv12->y_stride;
+  rec += px_row*rec_stride + px_col;
+  sse = 0;
+  for (i = 0; i < height; i++) {
+    for (j = 0; j < width; j++) {
+      int d;
+      d = src[i*src_stride + j] - rec[i*rec_stride + j];
+      sse += d*d;
+    }
+  }
+  args->dist += sse;
+}
+#endif
+
 static void write_modes_b(AV1_COMP *cpi, const TileInfo *const tile,
                           aom_writer *w, const TOKENEXTRA **tok,
                           const TOKENEXTRA *const tok_end,
@@ -1828,6 +1995,9 @@ static void write_modes_b(AV1_COMP *cpi, const TileInfo *const tile,
   MODE_INFO *m;
   int plane;
   int bh, bw;
+#if CONFIG_COLLECT_RD_STATS
+  BLOCK_SIZE actual_bsize;
+#endif
 #if CONFIG_PVQ
   MB_MODE_INFO *mbmi;
   BLOCK_SIZE bsize;
@@ -1896,6 +2066,62 @@ static void write_modes_b(AV1_COMP *cpi, const TileInfo *const tile,
 #endif
                         w);
   }
+
+#if CONFIG_COLLECT_RD_STATS
+  actual_bsize = AOMMAX(xd->mi[0]->mbmi.sb_type, BLOCK_8X8);
+  /*We didn't keep a copy of what was used for the prediction, so we have to
+    reconstruct it here.*/
+  if (!is_inter_block(&m->mbmi)) {
+    collect_rd_stats_args args;
+    args.cpi = cpi;
+    args.mi_row = mi_row;
+    args.mi_col = mi_col;
+    args.m = m;
+    for (plane = 0; plane < MAX_MB_PLANE; plane++) {
+      av1_foreach_transformed_block_in_plane(xd, actual_bsize, plane,
+                                             recompute_intra_diff_b, &args);
+    }
+  }
+  else {
+    struct buf_2d dst_backup[MAX_MB_PLANE];
+    uint8_t pred_buf[MAX_MB_PLANE][MAX_SB_SQUARE];
+    int is_compound;
+    int ref;
+    is_compound = has_second_ref(&m->mbmi);
+    set_ref_ptrs(cm, xd, m->mbmi.ref_frame[0], m->mbmi.ref_frame[1]);
+    for (ref = 0; ref < 1 + is_compound; ref++) {
+      YV12_BUFFER_CONFIG *ref_yv12;
+      ref_yv12 = get_ref_frame_buffer(cpi, m->mbmi.ref_frame[ref]);
+      av1_setup_pre_planes(xd, ref, ref_yv12, mi_row, mi_col,
+                           &xd->block_refs[ref]->sf);
+    }
+    /*Temporarily retarget the destination buffer to a local copy so we don't
+      overwrite the reconstructed frame.*/
+    for (plane = 0; plane < MAX_MB_PLANE; plane++) {
+      struct macroblockd_plane *pd;
+      pd = xd->plane + plane;
+      dst_backup[plane].buf = pd->dst.buf;
+      dst_backup[plane].stride = pd->dst.stride;
+      pd->dst.buf = pred_buf[plane];
+      pd->dst.stride = MAX_SB_SIZE;
+    }
+    av1_build_inter_predictors_sby(xd, mi_row, mi_col, NULL, actual_bsize);
+    av1_build_inter_predictors_sbuv(xd, mi_row, mi_col, NULL, actual_bsize);
+#if CONFIG_MOTION_VAR
+    if (m->mbmi.motion_mode == OBMC_CAUSAL) {
+      av1_build_obmc_inter_predictors_sb(cm, xd, mi_row, mi_col);
+    }
+#endif
+    for (plane = 0; plane < MAX_MB_PLANE; plane++) {
+      struct macroblockd_plane *pd;
+      pd = xd->plane + plane;
+      av1_subtract_plane(&cpi->td.mb, actual_bsize, plane);
+      /*Restore dst to point to the reconstruction buffer again.*/
+      pd->dst.buf = dst_backup[plane].buf;
+      pd->dst.stride = dst_backup[plane].stride;
+    }
+  }
+#endif
 
 #if CONFIG_PALETTE
   for (plane = 0; plane <= 1; ++plane) {
@@ -1992,11 +2218,11 @@ static void write_modes_b(AV1_COMP *cpi, const TileInfo *const tile,
     }
   }
 #else  // CONFIG_COEF_INTERLEAVE
-  if (!m->mbmi.skip) {
-    assert(*tok < tok_end);
-    for (plane = 0; plane < MAX_MB_PLANE; ++plane) {
-      MB_MODE_INFO *mbmi = &m->mbmi;
+  if (!m->mbmi.skip) assert(*tok < tok_end);
+  for (plane = 0; plane < MAX_MB_PLANE; ++plane) {
+    MB_MODE_INFO *mbmi = &m->mbmi;
 #if CONFIG_VAR_TX
+    if (!m->mbmi.skip) {
       const struct macroblockd_plane *const pd = &xd->plane[plane];
       BLOCK_SIZE bsize = mbmi->sb_type;
       const BLOCK_SIZE plane_bsize =
@@ -2042,23 +2268,69 @@ static void write_modes_b(AV1_COMP *cpi, const TileInfo *const tile,
           for (col = 0; col < num_4x4_w; col += bkw)
             pack_mb_tokens(w, tok, tok_end, cm->bit_depth, tx, &token_stats);
       }
-#else
-      TX_SIZE tx =
-          plane ? get_uv_tx_size(&m->mbmi, &xd->plane[plane]) : m->mbmi.tx_size;
-      TOKEN_STATS token_stats;
-      init_token_stats(&token_stats);
+    }
+#else // CONFIG_VAR_TX
+    TX_SIZE tx =
+      plane ? get_uv_tx_size(&m->mbmi, &xd->plane[plane]) : m->mbmi.tx_size;
+    TOKEN_STATS token_stats;
+#if CONFIG_COLLECT_RD_STATS
+    collect_rd_stats_args args;
+    int tell_frac;
+    tell_frac = od_ec_enc_tell_frac(&w->ec);
+#endif // CONFIG_COLLECT_RD_STATS
+    init_token_stats(&token_stats);
+    if (!m->mbmi.skip)
       pack_mb_tokens(w, tok, tok_end, cm->bit_depth, tx, &token_stats);
 #if CONFIG_RD_DEBUG
-      if (is_inter_block(mbmi) && mbmi->sb_type >= BLOCK_8X8 &&
-          rd_token_stats_mismatch(&m->mbmi.rd_stats, &token_stats, plane)) {
-        dump_mode_info(m);
-        assert(0);
-      }
+    if (is_inter_block(mbmi) && mbmi->sb_type >= BLOCK_8X8 &&
+        rd_token_stats_mismatch(&m->mbmi.rd_stats, &token_stats, plane)) {
+      dump_mode_info(m);
+      assert(0);
+    }
 #else
-      (void)mbmi;
+    (void)mbmi;
 #endif  // CONFIG_RD_DEBUG
 #endif  // CONFIG_VAR_TX
+#if CONFIG_COLLECT_RD_STATS
+    tell_frac = m->mbmi.skip ? 0 : od_ec_enc_tell_frac(&w->ec) - tell_frac;
 
+    args.cpi = cpi;
+    args.mi_row = mi_row;
+    args.mi_col = mi_col;
+    args.m = m;
+
+    args.n = 0;
+    args.acc = 0;
+    args.sse = 0;
+    args.dist = 0;
+
+    av1_foreach_transformed_block_in_plane(xd, actual_bsize, plane,
+                                           collect_rd_stats_b, &args);
+
+    if (!m->mbmi.skip) {
+      printf("%u %u %u  %d %d %d %d  %u %u %u %u  %u %u %u %u\n",
+             is_inter_block(&m->mbmi),                                         /* intra or inter */
+             plane,                                                            /* plane (Y, U, or V) */
+             av1_get_qindex(&cm->seg, m->mbmi.segment_id, cm->base_qindex),    /* quantizer index */
+
+             (int)(plane == 0 ? get_y_mode(m, 0) : m->mbmi.uv_mode),           /* mode */
+             (int)(plane == 0 ? get_y_mode(m, 1) : -1),                        /* mode */
+             (int)(plane == 0 ? get_y_mode(m, 2) : -1),                        /* mode */
+             (int)(plane == 0 ? get_y_mode(m, 3) : -1),                        /* mode */
+
+             xd->mi[0]->mbmi.sb_type,                                          /* block size / shape */
+             args.n,                                                           /* total pixels in prediction unit */
+             (unsigned)m->mbmi.tx_type,
+             (4<<tx)*(4<<tx),                                                  /* transform size */
+
+             (unsigned)rint(args.sse / (double)args.n * (1<<9)),               /* diff plane mse Q9) */
+             (unsigned)rint(sqrt((args.sse - (args.acc*args.acc / (double)args.n))/args.n) * (1<<9)), /* diff plane deviation (Q9)*/
+             (unsigned)(tell_frac << (AV1_PROB_COST_SHIFT - OD_BITRES)),       /* rate (bits in Q9) */
+             (unsigned)rint(args.dist / (double) args.n * (1<<9)));            /* coding MSE */
+    }
+#endif
+
+    if (!m->mbmi.skip) {
       assert(*tok < tok_end && (*tok)->token == EOSB_TOKEN);
       (*tok)++;
     }
