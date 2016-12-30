@@ -40,10 +40,10 @@ cglobal subtract_block, 7, 7, 8, \
 %endif
 
 %macro loop16 6
-  mova                  m0, [srcq+%1]
-  mova                  m4, [srcq+%2]
-  mova                  m1, [predq+%3]
-  mova                  m5, [predq+%4]
+  movu                  m0, [srcq+%1]
+  movu                  m4, [srcq+%2]
+  movu                  m1, [predq+%3]
+  movu                  m5, [predq+%4]
   punpckhbw             m2, m0, m7
   punpckhbw             m3, m1, m7
   punpcklbw             m0, m7
@@ -56,10 +56,10 @@ cglobal subtract_block, 7, 7, 8, \
   punpcklbw             m5, m7
   psubw                 m1, m3
   psubw                 m4, m5
-  mova [diffq+mmsize*0+%5], m0
-  mova [diffq+mmsize*1+%5], m2
-  mova [diffq+mmsize*0+%6], m4
-  mova [diffq+mmsize*1+%6], m1
+  movu [diffq+mmsize*0+%5], m0
+  movu [diffq+mmsize*1+%5], m2
+  movu [diffq+mmsize*0+%6], m4
+  movu [diffq+mmsize*1+%6], m1
 %endmacro
 
 %if CONFIG_EXT_PARTITION
