@@ -747,6 +747,7 @@ static int do_tx_type_search(TX_TYPE tx_type, int prune) {
 #endif
 }
 
+/* Used only by model_rd_for_sb() */
 static void model_rd_from_sse(const AV1_COMP *const cpi,
                               const MACROBLOCKD *const xd, BLOCK_SIZE bsize,
                               int plane, int64_t sse, int *rate,
@@ -777,6 +778,7 @@ static void model_rd_from_sse(const AV1_COMP *const cpi,
   *dist <<= 4;
 }
 
+/* Used only by handle_inter_mode() for interpolation filter RD calc */
 static void model_rd_for_sb(const AV1_COMP *const cpi, BLOCK_SIZE bsize,
                             MACROBLOCK *x, MACROBLOCKD *xd, int plane_from,
                             int plane_to, int *out_rate_sum,
@@ -1126,6 +1128,67 @@ static int rate_block(int plane, int block, int coeff_ctx, TX_SIZE tx_size,
                          args->scan_order->neighbors,
                          args->use_fast_coef_costing);
 }
+
+#if CONFIG_RD_MODEL
+
+/* simplest possible, fixed/closed-form implementation to start */
+float rd_alpha(int qs){
+  return 1.386f;
+}
+
+float rd_epsilon_sq(int i){
+  return i ? 1.2f : 1.4f;
+}
+
+float rd_beta(int qs, int i){
+  return i ? 12.f : 14.f;
+}
+
+static int rate_block_model(int plane, int block,
+                            int coeff_ctx, TX_SIZE tx_size,
+                            struct rdcost_block_args *args) {
+
+  MACROBLOCKD *const xd = &args->x->e_mbd;
+  MB_MODE_INFO *mbmi = &xd->mi[0]->mbmi;
+  const struct macroblock_plane *p = &args->x->plane[plane];
+  const struct macroblockd_plane *pd = &xd->plane[plane];
+  const PLANE_TYPE type = pd->plane_type;
+  const int eob = p->eobs[block];
+  tran_low_t *const coeff = BLOCK_OFFSET(p->coeff, block);
+  const int16_t *const quant = pd->dequant;
+  const int tx_size_ctx = txsize_sqr_map[tx_size];
+  const int tx_n = tx_size_2d[tx_size];
+  unsigned int(*token_costs)[2][COEFF_CONTEXTS][ENTROPY_TOKENS] =
+      args->x->token_costs[tx_size_ctx][type][is_inter_block(mbmi)];
+  const tran_low_t *const qcoeff = BLOCK_OFFSET(p->qcoeff, block);
+  float cost = 0;
+  int i;
+  // Add expected average cost for each coeff in A2
+  for(i=0; i<eob; i++){
+    const int rc = args->scan_order->scan[i];
+    const int qs = quant[rc!=0]*quant[rc!=0];
+    if (rd_epsilon_sq(rc)*coeff[rc]*coeff[rc] >= qs/rd_beta(qs, rc))
+      cost += logf(rd_beta(qs, i) * rd_epsilon_sq(i) *
+                   coeff[rc] * coeff[rc] /
+                   qs) / rd_alpha(qs);
+  }
+  cost *= (1 << AV1_PROB_COST_SHIFT);
+  // will this block code an EOB token?
+  if(eob < tx_n){
+    const uint16_t *cumulative = &band_cum_count_table[tx_size][0];
+    int eob_band = 0;
+    while(cumulative[eob_band]<eob)eob_band++;
+    if (eob) {
+      const int16_t *ni = args->scan_order->neighbors + MAX_NEIGHBORS * eob;
+      int n0 = av1_pt_energy_class[av1_get_token(qcoeff[ni[0]])];
+      int n1 = av1_pt_energy_class[av1_get_token(qcoeff[ni[1]])];
+      coeff_ctx = (n0 + n1 + 1) >> 1;
+    }
+    cost += token_costs[eob_band][0][coeff_ctx][EOB_TOKEN];
+  }
+  return (int)rint(cost);
+}
+#endif
 #endif
 
 static uint64_t sum_squares_2d(const int16_t *diff, int diff_stride,
@@ -1188,6 +1251,7 @@ static void block_rd_txfm(int plane, int block, int blk_row, int blk_col,
     struct encode_b_args b_args = {
       (AV1_COMMON *)cm, x, NULL, &mbmi->skip, args->t_above, args->t_left, 1
     };
+
     av1_encode_block_intra(plane, block, blk_row, blk_col, plane_bsize, tx_size,
                            &b_args);
 
@@ -1229,7 +1293,7 @@ static void block_rd_txfm(int plane, int block, int blk_row, int blk_col,
       this_rd_stats.dist = (int64_t)tmp * 16;
     }
   } else {
-// full forward transform and quantization
+    // full forward transform and quantization
 #if CONFIG_NEW_QUANT
     av1_xform_quant(cm, x, plane, block, blk_row, blk_col, plane_bsize, tx_size,
                     coeff_ctx, AV1_XFORM_QUANT_FP_NUQ);
@@ -1256,7 +1320,20 @@ static void block_rd_txfm(int plane, int block, int blk_row, int blk_col,
     return;
   }
 #if !CONFIG_PVQ
-  this_rd_stats.rate = rate_block(plane, block, coeff_ctx, tx_size, args);
+
+#if CONFIG_RD_MODEL
+  if (!is_inter_block(mbmi)) {
+    //int compare=rate_block(plane, block, coeff_ctx, tx_size, args);
+    this_rd_stats.rate =
+      rate_block_model(plane, block, coeff_ctx, tx_size, args);
+    //fprintf(stderr,"old rate=%d, model_rate=%d\n",compare,this_rd_stats.rate);
+  }else{
+#endif
+    this_rd_stats.rate = rate_block(plane, block, coeff_ctx, tx_size, args);
+#if CONFIG_RD_MODEL
+  }
+#endif
+  
 #if CONFIG_RD_DEBUG
   av1_update_txb_coeff_cost(&this_rd_stats, plane, tx_size, blk_row, blk_col,
                             this_rd_stats.rate);
