@@ -1133,7 +1133,7 @@ static int rate_block(int plane, int block, int coeff_ctx, TX_SIZE tx_size,
 
 /* simplest possible, fixed/closed-form implementation to start */
 float rd_alpha(int qs){
-  return 1.386f;
+  return .8;
 }
 
 float rd_epsilon_sq(int i){
@@ -1323,7 +1323,7 @@ static void block_rd_txfm(int plane, int block, int blk_row, int blk_col,
 
 #if CONFIG_RD_MODEL
   if (!is_inter_block(mbmi)) {
-    //int compare=rate_block(plane, block, coeff_ctx, tx_size, args);
+    int compare=rate_block(plane, block, coeff_ctx, tx_size, args);
     this_rd_stats.rate =
       rate_block_model(plane, block, coeff_ctx, tx_size, args);
     //fprintf(stderr,"old rate=%d, model_rate=%d\n",compare,this_rd_stats.rate);
