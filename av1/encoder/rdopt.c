@@ -1168,7 +1168,7 @@ static int rate_block_model(int plane, int block,
     const int rc = args->scan_order->scan[i];
     const int qs = quant[rc!=0]*quant[rc!=0];
     if (rd_epsilon_sq(rc)*coeff[rc]*coeff[rc] >= qs/rd_beta(qs, rc))
-      cost += logf(rd_beta(qs, i) * rd_epsilon_sq(i) *
+      cost += logf(rd_beta(qs, rc) * rd_epsilon_sq(rc) *
                    coeff[rc] * coeff[rc] /
                    qs) / rd_alpha(qs);
   }
