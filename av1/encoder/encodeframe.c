@@ -64,6 +64,9 @@
 #else
 #define IF_HBD(...)
 #endif  // CONFIG_AOM_HIGHBITDEPTH
+#if CONFIG_COLLECT_RD_STATS
+#include "hybrid_fwd_txfm.h"
+#endif
 
 static void encode_superblock(const AV1_COMP *const cpi, ThreadData *td,
                               TOKENEXTRA **t, RUN_TYPE dry_run, int mi_row,
@@ -5592,6 +5595,92 @@ static void tx_partition_set_contexts(const AV1_COMMON *const cm,
 }
 #endif
 
+#if CONFIG_COLLECT_RD_STATS
+typedef struct collect_rd_stats_args {
+  const AV1_COMMON *cm;
+  const AV1_COMP *cpi;
+  int mi_row;
+  int mi_col;
+  MODE_INFO *m;
+
+  uint32_t eobs;
+  int64_t average_dev;
+} collect_rd_stats_args;
+
+static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
+                               BLOCK_SIZE plane_bsize, TX_SIZE tx_size,
+                               void *arg) {
+  collect_rd_stats_args *args = (collect_rd_stats_args *)arg;
+  const AV1_COMP *cpi = args->cpi;
+  const AV1_COMMON *cm = args->cm;
+  const MACROBLOCK *x = &cpi->td.mb;
+  const MACROBLOCKD *const xd = &cpi->td.mb.e_mbd;
+  const MODE_INFO *m = xd->mi[0];
+  const struct macroblock_plane *p = &x->plane[plane];
+  int subblock_index;
+  int interp;
+  int tx_type;
+  int tx1d_size;
+  //int zdc;
+  int zac;
+
+  tran_low_t *coeff;
+  int i;
+  int n;
+  int32_t acc = 0;
+  int nonzero;
+
+  //zdc = p->zbin[0];
+  zac = p->zbin[1];
+  subblock_index = (blk_row & 1)*2 + (blk_col & 1);
+  coeff = BLOCK_OFFSET(p->coeff, block);
+
+  interp = is_inter_block(&m->mbmi);
+  tx_type = m->mbmi.tx_type;
+  tx1d_size = get_tx1d_size(tx_size);
+  n = tx1d_size*tx1d_size;
+  nonzero = n;
+
+  /* get our 'average deviation' (SATD without DC in this case) */
+
+#if 0 //experiment: don't count any coeffs after eob
+  const SCAN_ORDER *const scan_order = get_scan(cm, tx_size, tx_type, interp);
+  for (; nonzero > 0; nonzero--) {
+    const int rc = scan_order->scan[nonzero-1];
+    if(coeff[rc] >= zac || coeff[rc] <= -zac)
+      break;
+  }
+
+  /* get our 'average deviation' (SATD without DC in this case) */
+  for (i = 1; i < nonzero; i++) {
+    const int rc = scan_order->scan[i];
+    acc += abs(coeff[rc]);
+  }
+#endif
+
+#if 0 //experiment: don't count any coeffs below a threshold
+  const MACROBLOCKD *xd = &x->e_mbd;
+  const struct macroblockd_plane *pd = &xd->plane[plane];
+  int qac = pd->dequant[1];
+
+  for (i = 1; i < n; i++) {
+    if(coeff[i] > qac/2 || coeff[i] < -qac/2)
+      acc += abs(coeff[i]);
+  }
+#endif
+
+#if 1 //baseline: accumulate everything
+  for (i = 1; i < n; i++) {
+    acc += abs(coeff[i]);
+  }
+#endif
+
+  args->m->bmi[subblock_index].eob[plane] = p->eobs[block];
+  args->m->bmi[subblock_index].deviation[plane] = acc;
+  args->m->bmi[subblock_index].DC[plane] = coeff[0];
+}
+#endif
+
 static void encode_superblock(const AV1_COMP *const cpi, ThreadData *td,
                               TOKENEXTRA **t, RUN_TYPE dry_run, int mi_row,
                               int mi_col, BLOCK_SIZE bsize,
@@ -5752,6 +5841,19 @@ static void encode_superblock(const AV1_COMP *const cpi, ThreadData *td,
     av1_tokenize_sb(cpi, td, t, dry_run, block_size, rate, mi_row, mi_col);
 #endif
   }
+
+  /* RD Modeling data collection */
+#if CONFIG_COLLECT_RD_STATS
+  if (dry_run == OUTPUT_ENABLED) {
+    collect_rd_stats_args args;
+    args.m = mi;
+    args.cm = cm;
+    args.cpi = cpi;
+    args.mi_row = mi_row;
+    args.mi_col = mi_col;
+    av1_foreach_transformed_block(xd, block_size, collect_rd_stats_b, &args);
+  }
+#endif
 
   if (!dry_run) {
 #if CONFIG_VAR_TX
