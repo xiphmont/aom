@@ -233,6 +233,11 @@ typedef struct {
 #if CONFIG_EXT_INTER
   int_mv ref_mv[2];
 #endif  // CONFIG_EXT_INTER
+#if CONFIG_COLLECT_RD_STATS
+  int eob[MAX_MB_PLANE];
+  uint32_t deviation[MAX_MB_PLANE];
+  int DC[MAX_MB_PLANE];
+#endif
 } b_mode_info;
 
 typedef int8_t MV_REFERENCE_FRAME;

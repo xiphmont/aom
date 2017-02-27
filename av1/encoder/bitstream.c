@@ -840,11 +840,12 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
   *tp = p;
 }
 #else
-static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
+static int pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
                            const TOKENEXTRA *const stop,
                            aom_bit_depth_t bit_depth, const TX_SIZE tx_size,
                            TOKEN_STATS *token_stats) {
   const TOKENEXTRA *p = *tp;
+  int cost = 0;
 #if CONFIG_VAR_TX
   int count = 0;
   const int seg_eob = tx_size_2d[tx_size];
@@ -871,8 +872,11 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
 
 #if CONFIG_EC_MULTISYMBOL
     /* skip one or two nodes */
-    if (!p->skip_eob_node)
+    if (!p->skip_eob_node){
+      if(token == EOB_TOKEN)
+        cost = av1_cost_bit(p->context_tree[0], 0);
       aom_write_record(w, token != EOB_TOKEN, p->context_tree[0], token_stats);
+    }
     if (token != EOB_TOKEN) {
       aom_write_record(w, token != ZERO_TOKEN, p->context_tree[1], token_stats);
       if (token != ZERO_TOKEN) {
@@ -884,8 +888,11 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
     /* skip one or two nodes */
     if (p->skip_eob_node)
       coef_length -= p->skip_eob_node;
-    else
+    else{
+      if(token == EOB_TOKEN)
+        cost = av1_cost_bit(p->context_tree[0], 0);
       aom_write_record(w, token != EOB_TOKEN, p->context_tree[0], token_stats);
+    }
 
     if (token != EOB_TOKEN) {
       aom_write_record(w, token != ZERO_TOKEN, p->context_tree[1], token_stats);
@@ -943,6 +950,7 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
   }
 
   *tp = p;
+  return cost;
 }
 #endif
 #endif  // !CONFIG_PVG
@@ -1996,12 +2004,6 @@ static void write_mbmi_b(AV1_COMP *cpi, const TileInfo *const tile,
   }
 }
 
-#if CONFIG_DAALA_EC && !CONFIG_AOM_HIGHBITDEPTH && !CONFIG_PVQ
-#define CONFIG_COLLECT_RD_STATS (1)
-#else
-#undef CONFIG_COLLECT_RD_STATS
-#endif
-
 #if CONFIG_COLLECT_RD_STATS
 #include "hybrid_fwd_txfm.h"
 #include "av1/common/reconintra.h"
@@ -2011,15 +2013,21 @@ typedef struct collect_rd_stats_args {
   int mi_row;
   int mi_col;
   MODE_INFO *m;
+  const SCAN_ORDER *scan_order;
 
   uint32_t n;
   uint32_t L;
-  uint32_t q;
+  uint32_t qdc;
+  uint32_t qac;
+  uint32_t zdc;
+  uint32_t zac;
   uint32_t qi;
+  uint32_t eobs;
 
   int64_t var;
-  int64_t average_dev;
+  int64_t dev;
   int64_t dist;
+  int dc;
 } collect_rd_stats_args;
 
 static void recompute_intra_diff_b(int plane, int block,
@@ -2092,14 +2100,13 @@ static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
   AV1_COMP *cpi;
   const AV1_COMMON *cm;
   const MACROBLOCK *x;
+  const MACROBLOCKD *xd;
   const struct macroblock_plane *p;
   const struct macroblockd_plane *pd;
 
   YV12_BUFFER_CONFIG *src_yv12;
   YV12_BUFFER_CONFIG *rec_yv12;
   const int16_t *diff;
-  tran_low_t *const coeff;
-  const int eob;
   int diff_stride;
   const uint8_t *src;
   int src_stride;
@@ -2119,9 +2126,11 @@ static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
   int i;
   int j;
   int n;
+  int subblock_index;
   args = (collect_rd_stats_args *)arg;
   cpi = args->cpi;
   x = &cpi->td.mb;
+  xd = &x->e_mbd;
   p = &x->plane[plane];
   pd = &xd->plane[plane];
   src_yv12 = cpi->Source;
@@ -2136,10 +2145,13 @@ static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
   width = AOMMIN(px_col + tx1d_size, plane_width) - px_col;
   diff_stride = 4 << b_width_log2_lookup[plane_bsize];
   diff = p->src_diff + 4*(blk_row*diff_stride + blk_col);
+  subblock_index = (blk_row & 1)*2 + (blk_col & 1);
 
-  /* the actual quantizer in use */
-  args->q = pd->dequant;
-
+  /* the actual AC quantizer in use */
+  args->qdc = pd->dequant[0];
+  args->qac = pd->dequant[1];
+  args->zdc = p->zbin[0];
+  args->zac = p->zbin[1];
   /* get our block variance */
   acc = 0;
   sse = 0;
@@ -2153,16 +2165,10 @@ static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
   }
   n = width*height;
   args->n += n;
-  args->var += (sse + acc*acc / n) * (1<<9) / n;
-
-  /* get our 'average deviation' (SATD without DC in this case) */
-  eob = p->eobs[block];
-  coeff = BLOCK_OFFSET(p->coeff, block);
-  acc = 0;
-  /* we blindly assume DC is coeff 0 in transform and coding order */
-  for(i=1; i<eob; i++)
-    acc += abs(coeff[args->scan_order->scan[i]]);
-  args->average_dev += (acc << 9) / n;
+  args->var += sse + acc*acc / n;
+  args->dev += args->m->bmi[subblock_index].deviation[plane];
+  args->dc += abs(args->m->bmi[subblock_index].DC[plane]);
+  args->eobs += args->m->bmi[subblock_index].eob[plane];
 
   /* get our distortion */
   src = plane == 0 ? src_yv12->y_buffer :
@@ -2183,7 +2189,7 @@ static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
       sse += d*d;
     }
   }
-  args->dist += sse * (1<<9) / n;
+  args->dist += sse;
 }
 #endif
 
@@ -2438,11 +2444,12 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
 #if CONFIG_COLLECT_RD_STATS
     collect_rd_stats_args args;
     int tell_frac;
+    unsigned eob_frac = 0;
     tell_frac = od_ec_enc_tell_frac(&w->ec);
 #endif // CONFIG_COLLECT_RD_STATS
     init_token_stats(&token_stats);
     if (!m->mbmi.skip)
-      pack_mb_tokens(w, tok, tok_end, cm->bit_depth, tx, &token_stats);
+      eob_frac = pack_mb_tokens(w, tok, tok_end, cm->bit_depth, tx, &token_stats);
 #if CONFIG_RD_DEBUG
     if (is_inter_block(mbmi) && mbmi->sb_type >= BLOCK_8X8 &&
         rd_token_stats_mismatch(&m->mbmi.rd_stats, &token_stats, plane)) {
@@ -2466,19 +2473,26 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
     args.L = (4<<tx)*(4<<tx);
     args.qi = av1_get_qindex(&cm->seg, m->mbmi.segment_id, cm->base_qindex);
     args.n = 0;
-    args.acc = 0;
-    args.sse = 0;
+    args.dc = 0;
+    args.eobs = 0;
+    args.var = 0;
+    args.dev = 0;
     args.dist = 0;
+    args.scan_order =
+      get_scan(cm, m->mbmi.tx_size, m->mbmi.tx_type, is_inter_block(&m->mbmi));
 
     av1_foreach_transformed_block_in_plane(xd, actual_bsize, plane,
                                            collect_rd_stats_b, &args);
 
     if (!m->mbmi.skip) {
-      printf("%u %u %u %u  %d %d %d %d  %u %u %u %u  %u %u %u %u\n",
+      printf("%u %u %u   %u %u %u %u   %d %d %d %d   %u %u %u %u %u %u   %d %lu %lu %u %lu\n",
              is_inter_block(&m->mbmi),
              plane,
              args.qi, /* quantizer index */
-             args.q, /* quantizer */
+             args.qdc, /* quantizer for DC */
+             args.qac, /* quantizer for AC */
+             args.zdc, /* zbin for DC */
+             args.zac, /* zbin for AC */
 
              (int)(plane == 0 ? get_y_mode(m, 0) : m->mbmi.uv_mode),
              (int)(plane == 0 ? get_y_mode(m, 1) : -1),
@@ -2489,11 +2503,14 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
              args.n, /* total pixels in prediction unit */
              (unsigned)m->mbmi.tx_type, /* transform type */
              args.L, /* transform size */
+             args.eobs,
+             eob_frac,
 
-             args.var, /* block variance (Q9) */
-             args.average_dev, /* block 'averge deviation' (SATD) (Q9) */
-             (unsigned)tell_frac, /* rate (bits in Q9) */
-             args.dist); /* coding MSE (Q9) */
+             args.dc * (1<<9),          /* sum of absolute DC values */
+             args.var * (1<<9)/args.n,   /* block variance (Q9) */
+             args.dev * (1<<9),          /* 'average deviation' (SATD) (Q9) */
+             (unsigned)tell_frac,        /* rate (bits in Q9) */
+             args.dist); /* coding SE */
     }
 #endif
 
