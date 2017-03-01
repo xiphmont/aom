@@ -2006,190 +2006,41 @@ static void write_mbmi_b(AV1_COMP *cpi, const TileInfo *const tile,
 
 #if CONFIG_COLLECT_RD_STATS
 #include "hybrid_fwd_txfm.h"
-#include "av1/common/reconintra.h"
-
+ 
 typedef struct collect_rd_stats_args {
   AV1_COMP *cpi;
-  int mi_row;
-  int mi_col;
   MODE_INFO *m;
-  const SCAN_ORDER *scan_order;
 
-  uint32_t n;
-  uint32_t L;
-  uint32_t qdc;
-  uint32_t qac;
-  uint32_t zdc;
-  uint32_t zac;
-  uint32_t qi;
-  uint32_t eobs;
+  uint32_t px_n;
+  int32_t px_var_sum;
+  uint32_t px_var_ssq;
+  uint32_t px_dist_ssq;
 
-  int64_t var;
-  int64_t dev;
-  int64_t dist;
-  int dc;
+  uint32_t tx_n;
+  uint32_t tx_eob;
+  uint32_t tx_satd;
+  int32_t tx_dc;
+
 } collect_rd_stats_args;
-
-static void recompute_intra_diff_b(int plane, int block,
-    int blk_row, int blk_col, BLOCK_SIZE plane_bsize, TX_SIZE tx_size,
-    void *arg) {
-  collect_rd_stats_args *args;
-  AV1_COMP *cpi;
-  const AV1_COMMON *cm;
-  MACROBLOCK *x;
-  MACROBLOCKD *xd;
-  struct macroblock_plane *p;
-  PREDICTION_MODE mode;
-  YV12_BUFFER_CONFIG *src_yv12;
-  YV12_BUFFER_CONFIG *rec_yv12;
-  int tx1d_size;
-  int bwl;
-  int bhl;
-  uint8_t dst[1 << 2*(TX_SIZES + 1)];
-  int dst_stride;
-  uint8_t *src;
-  int src_stride;
-  uint8_t *rec;
-  int rec_stride;
-  int16_t *diff;
-  int diff_stride;
-  int subsampling_y;
-  int subsampling_x;
-  int px_row;
-  int px_col;
-
-  args = (collect_rd_stats_args *)arg;
-  cpi = args->cpi;
-  x = &cpi->td.mb;
-  xd = &x->e_mbd;
-  p = &x->plane[plane];
-  tx1d_size = get_tx1d_size(tx_size);
-  dst_stride = tx1d_size;
-  src_yv12 = cpi->Source;
-
-  subsampling_y = plane ? src_yv12->subsampling_y : 0;
-  subsampling_x = plane ? src_yv12->subsampling_x : 0;
-  px_row = (args->mi_row*8 >> subsampling_y) + blk_row*4;
-  px_col = (args->mi_col*8 >> subsampling_x) + blk_col*4;
-  src = plane == 0 ? src_yv12->y_buffer :
-      plane == 1 ? src_yv12->u_buffer : src_yv12->v_buffer;
-  src_stride = plane ? src_yv12->uv_stride : src_yv12->y_stride;
-  src += px_row*src_stride + px_col;
-  cm = &cpi->common;
-  rec_yv12 = get_frame_new_buffer(cm);
-  rec = plane == 0 ? rec_yv12->y_buffer :
-      plane == 1 ? rec_yv12->u_buffer : rec_yv12->v_buffer;
-  rec_stride = plane ? rec_yv12->uv_stride : rec_yv12->y_stride;
-  rec += px_row*rec_stride + px_col;
-
-  bwl = b_width_log2_lookup[plane_bsize];
-  bhl = b_height_log2_lookup[plane_bsize];
-  mode = plane == 0 ? get_y_mode(xd->mi[0], block) : xd->mi[0]->mbmi.uv_mode;
-  av1_predict_intra_block(xd, bwl, bhl, tx_size, mode,
-      rec, rec_stride, dst, dst_stride, blk_col, blk_row, plane);
-  diff_stride = 4 << bwl;
-  diff = p->src_diff + 4*(blk_row*diff_stride + blk_col);
-  aom_subtract_block(tx1d_size, tx1d_size, diff, diff_stride,
-                     src, src_stride, dst, dst_stride);
-}
 
 static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
                                BLOCK_SIZE plane_bsize, TX_SIZE tx_size,
                                void *arg) {
-  collect_rd_stats_args *args;
-  AV1_COMP *cpi;
-  const AV1_COMMON *cm;
-  const MACROBLOCK *x;
-  const MACROBLOCKD *xd;
-  const struct macroblock_plane *p;
-  const struct macroblockd_plane *pd;
+  collect_rd_stats_args *args = (collect_rd_stats_args *)arg;
+  const int subblock_index = (blk_row & 1)*2 + (blk_col & 1);
+  const int tx1d_size = get_tx1d_size(tx_size);
+  (void)block;
+  (void)plane_bsize;
 
-  YV12_BUFFER_CONFIG *src_yv12;
-  YV12_BUFFER_CONFIG *rec_yv12;
-  const int16_t *diff;
-  int diff_stride;
-  const uint8_t *src;
-  int src_stride;
-  const uint8_t *rec;
-  int rec_stride;
-  int subsampling_y;
-  int subsampling_x;
-  int tx1d_size;
-  int px_row;
-  int px_col;
-  int plane_height;
-  int plane_width;
-  int height;
-  int width;
-  int32_t acc;
-  int64_t sse;
-  int i;
-  int j;
-  int n;
-  int subblock_index;
-  args = (collect_rd_stats_args *)arg;
-  cpi = args->cpi;
-  x = &cpi->td.mb;
-  xd = &x->e_mbd;
-  p = &x->plane[plane];
-  pd = &xd->plane[plane];
-  src_yv12 = cpi->Source;
-  subsampling_y = plane ? src_yv12->subsampling_y : 0;
-  subsampling_x = plane ? src_yv12->subsampling_x : 0;
-  px_row = (args->mi_row*8 >> subsampling_y) + blk_row*4;
-  px_col = (args->mi_col*8 >> subsampling_x) + blk_col*4;
-  tx1d_size = get_tx1d_size(tx_size);
-  plane_height = plane ? src_yv12->uv_crop_height : src_yv12->y_crop_height;
-  plane_width = plane ? src_yv12->uv_crop_width : src_yv12->y_crop_width;
-  height = AOMMIN(px_row + tx1d_size, plane_height) - px_row;
-  width = AOMMIN(px_col + tx1d_size, plane_width) - px_col;
-  diff_stride = 4 << b_width_log2_lookup[plane_bsize];
-  diff = p->src_diff + 4*(blk_row*diff_stride + blk_col);
-  subblock_index = (blk_row & 1)*2 + (blk_col & 1);
+  args->px_n += args->m->bmi[subblock_index].px_n[plane];
+  args->px_var_sum += args->m->bmi[subblock_index].px_var_sum[plane];
+  args->px_var_ssq += args->m->bmi[subblock_index].px_var_ssq[plane];
+  args->px_dist_ssq += args->m->bmi[subblock_index].px_dist_ssq[plane];
+  args->tx_n = tx1d_size*tx1d_size;
+  args->tx_eob += args->m->bmi[subblock_index].tx_eob[plane];
+  args->tx_satd += args->m->bmi[subblock_index].tx_satd[plane];
+  args->tx_dc = args->m->bmi[subblock_index].tx_dc[plane];
 
-  /* the actual AC quantizer in use */
-  args->qdc = pd->dequant[0];
-  args->qac = pd->dequant[1];
-  args->zdc = p->zbin[0];
-  args->zac = p->zbin[1];
-  /* get our block variance */
-  acc = 0;
-  sse = 0;
-  for (i = 0; i < height; i++) {
-    for (j = 0; j < width; j++) {
-      int d;
-      d = diff[i*diff_stride + j];
-      acc += d;
-      sse += d*d;
-    }
-  }
-  n = width*height;
-  args->n += n;
-  args->var += sse + acc*acc / n;
-  args->dev += args->m->bmi[subblock_index].deviation[plane];
-  args->dc += abs(args->m->bmi[subblock_index].DC[plane]);
-  args->eobs += args->m->bmi[subblock_index].eob[plane];
-
-  /* get our distortion */
-  src = plane == 0 ? src_yv12->y_buffer :
-    plane == 1 ? src_yv12->u_buffer : src_yv12->v_buffer;
-  src_stride = plane ? src_yv12->uv_stride : src_yv12->y_stride;
-  src += px_row*src_stride + px_col;
-  cm = &cpi->common;
-  rec_yv12 = get_frame_new_buffer(cm);
-  rec = plane == 0 ? rec_yv12->y_buffer :
-      plane == 1 ? rec_yv12->u_buffer : rec_yv12->v_buffer;
-  rec_stride = plane ? rec_yv12->uv_stride : rec_yv12->y_stride;
-  rec += px_row*rec_stride + px_col;
-  sse = 0;
-  for (i = 0; i < height; i++) {
-    for (j = 0; j < width; j++) {
-      int d;
-      d = src[i*src_stride + j] - rec[i*rec_stride + j];
-      sse += d*d;
-    }
-  }
-  args->dist += sse;
 }
 #endif
 
@@ -2202,9 +2053,6 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
   MODE_INFO *m;
   int plane;
   int bh, bw;
-#if CONFIG_COLLECT_RD_STATS
-  BLOCK_SIZE actual_bsize;
-#endif
 #if CONFIG_PVQ
   MB_MODE_INFO *mbmi;
   BLOCK_SIZE bsize;
@@ -2232,62 +2080,6 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
   mbmi = &m->mbmi;
   bsize = mbmi->sb_type;
   adapt = &cpi->td.mb.daala_enc.state.adapt;
-#endif
-
-#if CONFIG_COLLECT_RD_STATS
-  actual_bsize = AOMMAX(xd->mi[0]->mbmi.sb_type, BLOCK_8X8);
-  /*We didn't keep a copy of what was used for the prediction, so we have to
-    reconstruct it here.*/
-  if (!is_inter_block(&m->mbmi)) {
-    collect_rd_stats_args args;
-    args.cpi = cpi;
-    args.mi_row = mi_row;
-    args.mi_col = mi_col;
-    args.m = m;
-    for (plane = 0; plane < MAX_MB_PLANE; plane++) {
-      av1_foreach_transformed_block_in_plane(xd, actual_bsize, plane,
-                                             recompute_intra_diff_b, &args);
-    }
-  }
-  else {
-    struct buf_2d dst_backup[MAX_MB_PLANE];
-    uint8_t pred_buf[MAX_MB_PLANE][MAX_SB_SQUARE];
-    int is_compound;
-    int ref;
-    is_compound = has_second_ref(&m->mbmi);
-    set_ref_ptrs(cm, xd, m->mbmi.ref_frame[0], m->mbmi.ref_frame[1]);
-    for (ref = 0; ref < 1 + is_compound; ref++) {
-      YV12_BUFFER_CONFIG *ref_yv12;
-      ref_yv12 = get_ref_frame_buffer(cpi, m->mbmi.ref_frame[ref]);
-      av1_setup_pre_planes(xd, ref, ref_yv12, mi_row, mi_col,
-                           &xd->block_refs[ref]->sf);
-    }
-    /*Temporarily retarget the destination buffer to a local copy so we don't
-      overwrite the reconstructed frame.*/
-    for (plane = 0; plane < MAX_MB_PLANE; plane++) {
-      struct macroblockd_plane *pd;
-      pd = xd->plane + plane;
-      dst_backup[plane].buf = pd->dst.buf;
-      dst_backup[plane].stride = pd->dst.stride;
-      pd->dst.buf = pred_buf[plane];
-      pd->dst.stride = MAX_SB_SIZE;
-    }
-    av1_build_inter_predictors_sby(xd, mi_row, mi_col, NULL, actual_bsize);
-    av1_build_inter_predictors_sbuv(xd, mi_row, mi_col, NULL, actual_bsize);
-#if CONFIG_MOTION_VAR
-    if (m->mbmi.motion_mode == OBMC_CAUSAL) {
-      av1_build_obmc_inter_predictors_sb(cm, xd, mi_row, mi_col);
-    }
-#endif
-    for (plane = 0; plane < MAX_MB_PLANE; plane++) {
-      struct macroblockd_plane *pd;
-      pd = xd->plane + plane;
-      av1_subtract_plane(&cpi->td.mb, actual_bsize, plane);
-      /*Restore dst to point to the reconstruction buffer again.*/
-      pd->dst.buf = dst_backup[plane].buf;
-      pd->dst.stride = dst_backup[plane].stride;
-    }
-  }
 #endif
 
 #if !CONFIG_PVQ
@@ -2461,38 +2253,36 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
 #endif  // CONFIG_RD_DEBUG
 #endif  // CONFIG_VAR_TX
 #if CONFIG_COLLECT_RD_STATS
+    const MACROBLOCK *x = &cpi->td.mb;
+    BLOCK_SIZE actual_bsize= AOMMAX(xd->mi[0]->mbmi.sb_type, BLOCK_8X8);
+
     tell_frac = m->mbmi.skip ? 0 : od_ec_enc_tell_frac(&w->ec) - tell_frac;
     tell_frac <<= AV1_PROB_COST_SHIFT - OD_BITRES; /* (bits in Q9) */
+    eob_frac <<= AV1_PROB_COST_SHIFT - OD_BITRES; /* (bits in Q9) */
 
     args.cpi = cpi;
-    args.mi_row = mi_row;
-    args.mi_col = mi_col;
     args.m = m;
-
-
-    args.L = (4<<tx)*(4<<tx);
-    args.qi = av1_get_qindex(&cm->seg, m->mbmi.segment_id, cm->base_qindex);
-    args.n = 0;
-    args.dc = 0;
-    args.eobs = 0;
-    args.var = 0;
-    args.dev = 0;
-    args.dist = 0;
-    args.scan_order =
-      get_scan(cm, m->mbmi.tx_size, m->mbmi.tx_type, is_inter_block(&m->mbmi));
+    args.px_n = 0;
+    args.px_var_sum = 0;
+    args.px_var_ssq = 0;
+    args.px_dist_ssq = 0;
+    args.tx_n = 0;
+    args.tx_eob = 0;
+    args.tx_satd = 0;
+    args.tx_dc = 0;
 
     av1_foreach_transformed_block_in_plane(xd, actual_bsize, plane,
                                            collect_rd_stats_b, &args);
 
     if (!m->mbmi.skip) {
-      printf("%u %u %u   %u %u %u %u   %d %d %d %d   %u %u %u %u %u %u   %d %lu %lu %u %lu\n",
+      printf("%u %u %u   %u %u %u %u   %d %d %d %d   %u %u %u %u %u %u   %d %u %u %u %d %u\n",
              is_inter_block(&m->mbmi),
              plane,
-             args.qi, /* quantizer index */
-             args.qdc, /* quantizer for DC */
-             args.qac, /* quantizer for AC */
-             args.zdc, /* zbin for DC */
-             args.zac, /* zbin for AC */
+             av1_get_qindex(&cm->seg, m->mbmi.segment_id, cm->base_qindex),
+             xd->plane[plane].dequant[0], /* actual DC quantizer */
+             xd->plane[plane].dequant[1], /* actual AC quantizer */
+             x->plane[plane].zbin[0],     /* DC quant threshold */
+             x->plane[plane].zbin[1],     /* AC quant threshold */
 
              (int)(plane == 0 ? get_y_mode(m, 0) : m->mbmi.uv_mode),
              (int)(plane == 0 ? get_y_mode(m, 1) : -1),
@@ -2500,17 +2290,18 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
              (int)(plane == 0 ? get_y_mode(m, 3) : -1),
 
              xd->mi[0]->mbmi.sb_type, /* block size / shape index */
-             args.n, /* total pixels in prediction unit */
+             args.px_n, /* total valid pixels in prediction unit */
              (unsigned)m->mbmi.tx_type, /* transform type */
-             args.L, /* transform size */
-             args.eobs,
-             eob_frac,
+             args.tx_n, /* transform size */
+             args.tx_eob, /* Total coded coefficients */
+             eob_frac, /* Approximately how much did the EOB token cost? */
 
-             args.dc * (1<<9),          /* sum of absolute DC values */
-             args.var * (1<<9)/args.n,   /* block variance (Q9) */
-             args.dev * (1<<9),          /* 'average deviation' (SATD) (Q9) */
-             (unsigned)tell_frac,        /* rate (bits in Q9) */
-             args.dist); /* coding SE */
+             args.px_var_sum,
+             args.px_var_ssq,
+             args.px_dist_ssq,
+             args.tx_satd,
+             args.tx_dc,
+             (unsigned)tell_frac);
     }
 #endif
 
