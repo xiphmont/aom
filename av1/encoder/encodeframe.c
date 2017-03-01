@@ -5597,14 +5597,10 @@ static void tx_partition_set_contexts(const AV1_COMMON *const cm,
 
 #if CONFIG_COLLECT_RD_STATS
 typedef struct collect_rd_stats_args {
-  const AV1_COMMON *cm;
   const AV1_COMP *cpi;
   int mi_row;
   int mi_col;
   MODE_INFO *m;
-
-  uint32_t eobs;
-  int64_t average_dev;
 } collect_rd_stats_args;
 
 static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
@@ -5612,72 +5608,76 @@ static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
                                void *arg) {
   collect_rd_stats_args *args = (collect_rd_stats_args *)arg;
   const AV1_COMP *cpi = args->cpi;
-  const AV1_COMMON *cm = args->cm;
+  const AV1_COMMON *cm = cm = &cpi->common;
   const MACROBLOCK *x = &cpi->td.mb;
-  const MACROBLOCKD *const xd = &cpi->td.mb.e_mbd;
-  const MODE_INFO *m = xd->mi[0];
   const struct macroblock_plane *p = &x->plane[plane];
-  int subblock_index;
-  int interp;
-  int tx_type;
-  int tx1d_size;
-  //int zdc;
-  int zac;
+  const YV12_BUFFER_CONFIG *src_yv12 = cpi->Source;
+  const YV12_BUFFER_CONFIG *rec_yv12 = get_frame_new_buffer(cm);
+  const int tx1d_size = get_tx1d_size(tx_size);
+  const int subsampling_y = plane ? src_yv12->subsampling_y : 0;
+  const int subsampling_x = plane ? src_yv12->subsampling_x : 0;
+  const int px_row = (args->mi_row*8 >> subsampling_y) + blk_row*4;
+  const int px_col = (args->mi_col*8 >> subsampling_x) + blk_col*4;
+  const int plane_height = plane ? src_yv12->uv_crop_height :
+    src_yv12->y_crop_height;
+  const int plane_width = plane ? src_yv12->uv_crop_width :
+    src_yv12->y_crop_width;
+  const int px_height = AOMMIN(px_row + tx1d_size, plane_height) - px_row;
+  const int px_width = AOMMIN(px_col + tx1d_size, plane_width) - px_col;
+  const int src_stride = plane ? src_yv12->uv_stride : src_yv12->y_stride;
+  const uint8_t *src = (plane == 0 ? src_yv12->y_buffer :
+                       plane == 1 ? src_yv12->u_buffer : src_yv12->v_buffer) +
+    px_row*src_stride + px_col;
+  const int rec_stride = plane ? rec_yv12->uv_stride : rec_yv12->y_stride;
+  const uint8_t *rec = (plane == 0 ? rec_yv12->y_buffer :
+                        plane == 1 ? rec_yv12->u_buffer : rec_yv12->v_buffer) +
+    px_row*rec_stride + px_col;
+  const int diff_stride = 4 << b_width_log2_lookup[plane_bsize];
+  const int16_t *diff = p->src_diff + 4*(blk_row*diff_stride + blk_col);
 
-  tran_low_t *coeff;
+  const tran_low_t *coeff = BLOCK_OFFSET(p->coeff, block);
+  const int subblock_index = (blk_row & 1)*2 + (blk_col & 1);
+
   int i;
-  int n;
-  int32_t acc = 0;
-  int nonzero;
+  int j;
+  int pixels = px_width*px_height;
+  int coeffs = tx1d_size*tx1d_size;
+  int32_t sum;
+  int32_t ssq;
 
-  //zdc = p->zbin[0];
-  zac = p->zbin[1];
-  subblock_index = (blk_row & 1)*2 + (blk_col & 1);
-  coeff = BLOCK_OFFSET(p->coeff, block);
+  /* Compute pixel variance from the difference buffer. */
+  sum = 0;
+  ssq = 0;
+  for (i = 0; i < px_height; i++) {
+    for (j = 0; j < px_width; j++) {
+      int d = diff[i*diff_stride + j];
+      sum += d;
+      ssq += d*d;
+    }
+  }
+  args->m->bmi[subblock_index].px_n[plane] = pixels;
+  args->m->bmi[subblock_index].px_var_sum[plane] = sum;
+  args->m->bmi[subblock_index].px_var_ssq[plane] = ssq;
 
-  interp = is_inter_block(&m->mbmi);
-  tx_type = m->mbmi.tx_type;
-  tx1d_size = get_tx1d_size(tx_size);
-  n = tx1d_size*tx1d_size;
-  nonzero = n;
+  /* Compute pixel distortion. */
+  ssq = 0;
+  for (i = 0; i < px_height; i++) {
+    for (j = 0; j < px_width; j++) {
+      int d = src[i*src_stride + j] - rec[i*rec_stride + j];
+      ssq += d*d;
+    }
+  }
+  args->m->bmi[subblock_index].px_dist_ssq[plane] = ssq;
 
-  /* get our 'average deviation' (SATD without DC in this case) */
-
-#if 0 //experiment: don't count any coeffs after eob
-  const SCAN_ORDER *const scan_order = get_scan(cm, tx_size, tx_type, interp);
-  for (; nonzero > 0; nonzero--) {
-    const int rc = scan_order->scan[nonzero-1];
-    if(coeff[rc] >= zac || coeff[rc] <= -zac)
-      break;
+  /* Compute SATD (without DC, stored separately) */
+  sum = 0;
+  for (i = 1; i < coeffs; i++) {
+    sum += abs(coeff[i]);
   }
 
-  /* get our 'average deviation' (SATD without DC in this case) */
-  for (i = 1; i < nonzero; i++) {
-    const int rc = scan_order->scan[i];
-    acc += abs(coeff[rc]);
-  }
-#endif
-
-#if 0 //experiment: don't count any coeffs below a threshold
-  const MACROBLOCKD *xd = &x->e_mbd;
-  const struct macroblockd_plane *pd = &xd->plane[plane];
-  int qac = pd->dequant[1];
-
-  for (i = 1; i < n; i++) {
-    if(coeff[i] > qac/2 || coeff[i] < -qac/2)
-      acc += abs(coeff[i]);
-  }
-#endif
-
-#if 1 //baseline: accumulate everything
-  for (i = 1; i < n; i++) {
-    acc += abs(coeff[i]);
-  }
-#endif
-
-  args->m->bmi[subblock_index].eob[plane] = p->eobs[block];
-  args->m->bmi[subblock_index].deviation[plane] = acc;
-  args->m->bmi[subblock_index].DC[plane] = coeff[0];
+  args->m->bmi[subblock_index].tx_eob[plane] = p->eobs[block];
+  args->m->bmi[subblock_index].tx_satd[plane] = sum;
+  args->m->bmi[subblock_index].tx_dc[plane] = coeff[0];
 }
 #endif
 
@@ -5847,7 +5847,6 @@ static void encode_superblock(const AV1_COMP *const cpi, ThreadData *td,
   if (dry_run == OUTPUT_ENABLED) {
     collect_rd_stats_args args;
     args.m = mi;
-    args.cm = cm;
     args.cpi = cpi;
     args.mi_row = mi_row;
     args.mi_col = mi_col;
