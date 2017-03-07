@@ -763,7 +763,7 @@ static void update_supertx_probs(AV1_COMMON *cm, int probwt, aom_writer *w) {
 #endif  // CONFIG_SUPERTX
 
 #if CONFIG_NEW_TOKENSET
-static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
+static int pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
                            const TOKENEXTRA *const stop,
                            aom_bit_depth_t bit_depth, const TX_SIZE tx_size,
                            TOKEN_STATS *token_stats) {
@@ -838,6 +838,7 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
   }
 
   *tp = p;
+  return cost;
 }
 #else
 static int pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
@@ -2017,6 +2018,7 @@ typedef struct collect_rd_stats_args {
   uint32_t px_dist_ssq;
 
   uint32_t tx_n;
+  uint32_t tx_size;
   uint32_t tx_eob;
   uint32_t tx_satd;
   int32_t tx_dc;
@@ -2036,7 +2038,8 @@ static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
   args->px_var_sum += args->m->bmi[subblock_index].px_var_sum[plane];
   args->px_var_ssq += args->m->bmi[subblock_index].px_var_ssq[plane];
   args->px_dist_ssq += args->m->bmi[subblock_index].px_dist_ssq[plane];
-  args->tx_n = tx1d_size*tx1d_size;
+  args->tx_n += tx1d_size*tx1d_size;
+  args->tx_size = tx1d_size*tx1d_size;
   args->tx_eob += args->m->bmi[subblock_index].tx_eob[plane];
   args->tx_satd += args->m->bmi[subblock_index].tx_satd[plane];
   args->tx_dc = args->m->bmi[subblock_index].tx_dc[plane];
@@ -2258,7 +2261,6 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
 
     tell_frac = m->mbmi.skip ? 0 : od_ec_enc_tell_frac(&w->ec) - tell_frac;
     tell_frac <<= AV1_PROB_COST_SHIFT - OD_BITRES; /* (bits in Q9) */
-    eob_frac <<= AV1_PROB_COST_SHIFT - OD_BITRES; /* (bits in Q9) */
 
     args.cpi = cpi;
     args.m = m;
@@ -2267,6 +2269,7 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
     args.px_var_ssq = 0;
     args.px_dist_ssq = 0;
     args.tx_n = 0;
+    args.tx_size = 0;
     args.tx_eob = 0;
     args.tx_satd = 0;
     args.tx_dc = 0;
@@ -2275,7 +2278,8 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
                                            collect_rd_stats_b, &args);
 
     if (!m->mbmi.skip) {
-      printf("%u %u %u   %u %u %u %u   %d %d %d %d   %u %u %u %u %u %u   %d %u %u %u %d %u\n",
+      printf("%u %u %u   %u %u %u %u   %d %d %d %d   %u %u %u %u %u %u %u "
+             "  %d %u %u %u %d %u\n",
              is_inter_block(&m->mbmi),
              plane,
              av1_get_qindex(&cm->seg, m->mbmi.segment_id, cm->base_qindex),
@@ -2292,8 +2296,9 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
              xd->mi[0]->mbmi.sb_type, /* block size / shape index */
              args.px_n, /* total valid pixels in prediction unit */
              (unsigned)m->mbmi.tx_type, /* transform type */
-             args.tx_n, /* transform size */
-             args.tx_eob, /* Total coded coefficients */
+             args.tx_size, /* transform size */
+             args.tx_n, /* Total coefficients transformed */
+             args.tx_eob, /* Total coefficients coded */
              eob_frac, /* Approximately how much did the EOB token cost? */
 
              args.px_var_sum,
