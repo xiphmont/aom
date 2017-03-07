@@ -784,6 +784,7 @@ static int pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
                            aom_bit_depth_t bit_depth, const TX_SIZE tx_size,
                            TOKEN_STATS *token_stats) {
   const TOKENEXTRA *p = *tp;
+  int cost = 0;
 #if CONFIG_VAR_TX || CONFIG_PALETTE_THROUGHPUT
   int count = 0;
   const int seg_eob = tx_size_2d[tx_size];
@@ -862,6 +863,7 @@ static int pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
                            aom_bit_depth_t bit_depth, const TX_SIZE tx_size,
                            TOKEN_STATS *token_stats) {
   const TOKENEXTRA *p = *tp;
+  int cost = 0;
 #if CONFIG_VAR_TX || CONFIG_PALETTE_THROUGHPUT
   int count = 0;
   const int seg_eob = tx_size_2d[tx_size];
@@ -2066,7 +2068,6 @@ static void write_mbmi_b(AV1_COMP *cpi, const TileInfo *const tile,
   MACROBLOCKD *const xd = &cpi->td.mb.e_mbd;
   MODE_INFO *m;
   int bh, bw;
-
   xd->mi = cm->mi_grid_visible + (mi_row * cm->mi_stride + mi_col);
   m = xd->mi[0];
 
@@ -2132,7 +2133,7 @@ static void write_mbmi_b(AV1_COMP *cpi, const TileInfo *const tile,
 
 #if CONFIG_COLLECT_RD_STATS
 #include "hybrid_fwd_txfm.h"
- 
+
 typedef struct collect_rd_stats_args {
   AV1_COMP *cpi;
   MODE_INFO *m;
@@ -2200,62 +2201,6 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
                  cm->dependent_horz_tiles);
 #else
   set_mi_row_col(xd, tile, mi_row, bh, mi_col, bw, cm->mi_rows, cm->mi_cols);
-#endif
-
-#if CONFIG_COLLECT_RD_STATS
-  actual_bsize = AOMMAX(xd->mi[0]->mbmi.sb_type, BLOCK_8X8);
-  /*We didn't keep a copy of what was used for the prediction, so we have to
-    reconstruct it here.*/
-  if (!is_inter_block(&m->mbmi)) {
-    collect_rd_stats_args args;
-    args.cpi = cpi;
-    args.mi_row = mi_row;
-    args.mi_col = mi_col;
-    args.m = m;
-    for (plane = 0; plane < MAX_MB_PLANE; plane++) {
-      av1_foreach_transformed_block_in_plane(xd, actual_bsize, plane,
-                                             recompute_intra_diff_b, &args);
-    }
-  }
-  else {
-    struct buf_2d dst_backup[MAX_MB_PLANE];
-    uint8_t pred_buf[MAX_MB_PLANE][MAX_SB_SQUARE];
-    int is_compound;
-    int ref;
-    is_compound = has_second_ref(&m->mbmi);
-    set_ref_ptrs(cm, xd, m->mbmi.ref_frame[0], m->mbmi.ref_frame[1]);
-    for (ref = 0; ref < 1 + is_compound; ref++) {
-      YV12_BUFFER_CONFIG *ref_yv12;
-      ref_yv12 = get_ref_frame_buffer(cpi, m->mbmi.ref_frame[ref]);
-      av1_setup_pre_planes(xd, ref, ref_yv12, mi_row, mi_col,
-                           &xd->block_refs[ref]->sf);
-    }
-    /*Temporarily retarget the destination buffer to a local copy so we don't
-      overwrite the reconstructed frame.*/
-    for (plane = 0; plane < MAX_MB_PLANE; plane++) {
-      struct macroblockd_plane *pd;
-      pd = xd->plane + plane;
-      dst_backup[plane].buf = pd->dst.buf;
-      dst_backup[plane].stride = pd->dst.stride;
-      pd->dst.buf = pred_buf[plane];
-      pd->dst.stride = MAX_SB_SIZE;
-    }
-    av1_build_inter_predictors_sby(xd, mi_row, mi_col, NULL, actual_bsize);
-    av1_build_inter_predictors_sbuv(xd, mi_row, mi_col, NULL, actual_bsize);
-#if CONFIG_MOTION_VAR
-    if (m->mbmi.motion_mode == OBMC_CAUSAL) {
-      av1_build_obmc_inter_predictors_sb(cm, xd, mi_row, mi_col);
-    }
-#endif
-    for (plane = 0; plane < MAX_MB_PLANE; plane++) {
-      struct macroblockd_plane *pd;
-      pd = xd->plane + plane;
-      av1_subtract_plane(&cpi->td.mb, actual_bsize, plane);
-      /*Restore dst to point to the reconstruction buffer again.*/
-      pd->dst.buf = dst_backup[plane].buf;
-      pd->dst.stride = dst_backup[plane].stride;
-    }
-  }
 #endif
 
 #if CONFIG_PALETTE
@@ -2493,8 +2438,65 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
       }
 #else
 #if !CONFIG_PVQ
+#if CONFIG_COLLECT_RD_STATS
+      const MACROBLOCK *x = &cpi->td.mb;
+      const BLOCK_SIZE actual_bsize= AOMMAX(xd->mi[0]->mbmi.sb_type, BLOCK_8X8);
+      collect_rd_stats_args args;
+      int tell_frac;
+      unsigned eob_frac = 0;
+      tell_frac = od_ec_enc_tell_frac(&w->ec);
+#endif // CONFIG_COLLECT_RD_STATS
       init_token_stats(&token_stats);
-      pack_mb_tokens(w, tok, tok_end, cm->bit_depth, tx, &token_stats);
+      eob_frac =
+        pack_mb_tokens(w, tok, tok_end, cm->bit_depth, tx, &token_stats);
+#if CONFIG_COLLECT_RD_STATS
+      tell_frac = m->mbmi.skip ? 0 : od_ec_enc_tell_frac(&w->ec) - tell_frac;
+      tell_frac <<= AV1_PROB_COST_SHIFT - OD_BITRES; /* (bits in Q9) */
+      args.cpi = cpi;
+      args.m = m;
+      args.px_n = 0;
+      args.px_var_sum = 0;
+      args.px_var_ssq = 0;
+      args.px_dist_ssq = 0;
+      args.tx_n = 0;
+      args.tx_size = 0;
+      args.tx_eob = 0;
+      args.tx_satd = 0;
+      args.tx_dc = 0;
+
+      av1_foreach_transformed_block_in_plane(xd, actual_bsize, plane,
+                                             collect_rd_stats_b, &args);
+
+      printf("%u %u %u   %u %u %u %u   %d %d %d %d   %u %u %u %u %u %u %u "
+             "  %d %u %u %u %d %u\n",
+             is_inter_block(&m->mbmi),
+             plane,
+             av1_get_qindex(&cm->seg, m->mbmi.segment_id, cm->base_qindex),
+             xd->plane[plane].dequant[0], /* actual DC quantizer */
+             xd->plane[plane].dequant[1], /* actual AC quantizer */
+             x->plane[plane].zbin[0],     /* DC quant threshold */
+             x->plane[plane].zbin[1],     /* AC quant threshold */
+
+             (int)(plane == 0 ? get_y_mode(m, 0) : m->mbmi.uv_mode),
+             (int)(plane == 0 ? get_y_mode(m, 1) : -1),
+             (int)(plane == 0 ? get_y_mode(m, 2) : -1),
+             (int)(plane == 0 ? get_y_mode(m, 3) : -1),
+
+             xd->mi[0]->mbmi.sb_type, /* block size / shape index */
+             args.px_n, /* total valid pixels in prediction unit */
+             (unsigned)m->mbmi.tx_type, /* transform type */
+             args.tx_size, /* transform size */
+             args.tx_n, /* Total coefficients transformed */
+             args.tx_eob, /* Total coefficients coded */
+             eob_frac, /* Approximately how much did the EOB token cost? */
+
+             args.px_var_sum,
+             args.px_var_ssq,
+             args.px_dist_ssq,
+             args.tx_satd,
+             args.tx_dc,
+             (unsigned)tell_frac);
+#endif // CONFIG_COLLECT_RD_STATS
 #else
       (void)token_stats;
       pack_pvq_tokens(w, x, xd, plane, mbmi->sb_type, tx);
@@ -2510,48 +2512,6 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
     (void)mbmi;
 #endif  // CONFIG_RD_DEBUG
 #endif  // CONFIG_VAR_TX
-#if CONFIG_COLLECT_RD_STATS
-    const MACROBLOCK *x = &cpi->td.mb;
-    BLOCK_SIZE actual_bsize= AOMMAX(xd->mi[0]->mbmi.sb_type, BLOCK_8X8);
-
-    tell_frac = m->mbmi.skip ? 0 : od_ec_enc_tell_frac(&w->ec) - tell_frac;
-    args.cpi = cpi;
-    args.m = m;
-    args.n = 0;
-    args.dc = 0;
-    args.eobs = 0;
-    args.var = 0;
-    args.dev = 0;
-    args.dist = 0;
-    args.scan_order =
-      get_scan(cm, m->mbmi.tx_size, m->mbmi.tx_type, is_inter_block(&m->mbmi));
-
-    av1_foreach_transformed_block_in_plane(xd, actual_bsize, plane,
-                                           collect_rd_stats_b, &args);
-
-    if (!m->mbmi.skip) {
-      printf("%u %u %u  %d %d %d %d  %u %u %u %u  %u %u %u %u\n",
-             is_inter_block(&m->mbmi),                                         /* intra or inter */
-             plane,                                                            /* plane (Y, U, or V) */
-             av1_get_qindex(&cm->seg, m->mbmi.segment_id, cm->base_qindex),    /* quantizer index */
-
-             (int)(plane == 0 ? get_y_mode(m, 0) : m->mbmi.uv_mode),           /* mode */
-             (int)(plane == 0 ? get_y_mode(m, 1) : -1),                        /* mode */
-             (int)(plane == 0 ? get_y_mode(m, 2) : -1),                        /* mode */
-             (int)(plane == 0 ? get_y_mode(m, 3) : -1),                        /* mode */
-
-             xd->mi[0]->mbmi.sb_type,                                          /* block size / shape */
-             args.n,                                                           /* total pixels in prediction unit */
-             (unsigned)m->mbmi.tx_type,
-             (4<<tx)*(4<<tx),                                                  /* transform size */
-
-             (unsigned)rint(args.sse / (double)args.n * (1<<9)),               /* diff plane mse Q9) */
-             (unsigned)rint(sqrt((args.sse - (args.acc*args.acc / (double)args.n))/args.n) * (1<<9)), /* diff plane deviation (Q9)*/
-             (unsigned)(tell_frac << (AV1_PROB_COST_SHIFT - OD_BITRES)),       /* rate (bits in Q9) */
-             (unsigned)rint(args.dist / (double) args.n * (1<<9)));            /* coding MSE */
-    }
-#endif
-
 #if !CONFIG_PVQ
       assert(*tok < tok_end && (*tok)->token == EOSB_TOKEN);
       (*tok)++;

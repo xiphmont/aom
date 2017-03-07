@@ -5845,12 +5845,16 @@ static void encode_superblock(const AV1_COMP *const cpi, ThreadData *td,
   /* RD Modeling data collection */
 #if CONFIG_COLLECT_RD_STATS
   if (dry_run == OUTPUT_ENABLED) {
+    int plane;
     collect_rd_stats_args args;
     args.m = mi;
     args.cpi = cpi;
     args.mi_row = mi_row;
     args.mi_col = mi_col;
-    av1_foreach_transformed_block(xd, block_size, collect_rd_stats_b, &args);
+
+    for (plane = 0; plane < MAX_MB_PLANE; ++plane)
+      av1_foreach_transformed_block_in_plane(xd, block_size, plane,
+                                             collect_rd_stats_b, &args);
   }
 #endif
 
