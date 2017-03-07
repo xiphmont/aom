@@ -2068,6 +2068,7 @@ static void write_mbmi_b(AV1_COMP *cpi, const TileInfo *const tile,
   MACROBLOCKD *const xd = &cpi->td.mb.e_mbd;
   MODE_INFO *m;
   int bh, bw;
+
   xd->mi = cm->mi_grid_visible + (mi_row * cm->mi_stride + mi_col);
   m = xd->mi[0];
 
