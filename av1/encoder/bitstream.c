@@ -779,7 +779,7 @@ static void update_supertx_probs(AV1_COMMON *cm, int probwt, aom_writer *w) {
 #endif  // CONFIG_SUPERTX
 
 #if CONFIG_NEW_TOKENSET
-static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
+static int pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
                            const TOKENEXTRA *const stop,
                            aom_bit_depth_t bit_depth, const TX_SIZE tx_size,
                            TOKEN_STATS *token_stats) {
@@ -854,6 +854,7 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
   }
 
   *tp = p;
+  return cost;
 }
 #else
 static int pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
@@ -2142,6 +2143,7 @@ typedef struct collect_rd_stats_args {
   uint32_t px_dist_ssq;
 
   uint32_t tx_n;
+  uint32_t tx_size;
   uint32_t tx_eob;
   uint32_t tx_satd;
   int32_t tx_dc;
@@ -2161,7 +2163,8 @@ static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
   args->px_var_sum += args->m->bmi[subblock_index].px_var_sum[plane];
   args->px_var_ssq += args->m->bmi[subblock_index].px_var_ssq[plane];
   args->px_dist_ssq += args->m->bmi[subblock_index].px_dist_ssq[plane];
-  args->tx_n = tx1d_size*tx1d_size;
+  args->tx_n += tx1d_size*tx1d_size;
+  args->tx_size = tx1d_size*tx1d_size;
   args->tx_eob += args->m->bmi[subblock_index].tx_eob[plane];
   args->tx_satd += args->m->bmi[subblock_index].tx_satd[plane];
   args->tx_dc = args->m->bmi[subblock_index].tx_dc[plane];
