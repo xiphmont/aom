@@ -2132,48 +2132,6 @@ static void write_mbmi_b(AV1_COMP *cpi, const TileInfo *const tile,
   }
 }
 
-#if CONFIG_COLLECT_RD_STATS
-#include "hybrid_fwd_txfm.h"
-
-typedef struct collect_rd_stats_args {
-  AV1_COMP *cpi;
-  MODE_INFO *m;
-
-  uint32_t px_n;
-  int32_t px_var_sum;
-  uint32_t px_var_ssq;
-  uint32_t px_dist_ssq;
-
-  uint32_t tx_n;
-  uint32_t tx_size;
-  uint32_t tx_eob;
-  uint32_t tx_satd;
-  int32_t tx_dc;
-
-} collect_rd_stats_args;
-
-static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
-                               BLOCK_SIZE plane_bsize, TX_SIZE tx_size,
-                               void *arg) {
-  collect_rd_stats_args *args = (collect_rd_stats_args *)arg;
-  const int subblock_index = (blk_row & 1)*2 + (blk_col & 1);
-  const int tx1d_size = get_tx1d_size(tx_size);
-  (void)block;
-  (void)plane_bsize;
-
-  args->px_n += args->m->bmi[subblock_index].px_n[plane];
-  args->px_var_sum += args->m->bmi[subblock_index].px_var_sum[plane];
-  args->px_var_ssq += args->m->bmi[subblock_index].px_var_ssq[plane];
-  args->px_dist_ssq += args->m->bmi[subblock_index].px_dist_ssq[plane];
-  args->tx_n += tx1d_size*tx1d_size;
-  args->tx_size = tx1d_size*tx1d_size;
-  args->tx_eob += args->m->bmi[subblock_index].tx_eob[plane];
-  args->tx_satd += args->m->bmi[subblock_index].tx_satd[plane];
-  args->tx_dc = args->m->bmi[subblock_index].tx_dc[plane];
-
-}
-#endif
-
 static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
                            aom_writer *w, const TOKENEXTRA **tok,
                            const TOKENEXTRA *const tok_end, int mi_row,
@@ -2439,63 +2397,39 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
       }
 #else
 #if !CONFIG_PVQ
+      init_token_stats(&token_stats);
 #if CONFIG_COLLECT_RD_STATS
-      const MACROBLOCK *x = &cpi->td.mb;
-      const BLOCK_SIZE actual_bsize= AOMMAX(xd->mi[0]->mbmi.sb_type, BLOCK_8X8);
-      collect_rd_stats_args args;
       int tell_frac;
       unsigned eob_frac = 0;
+      const int tx_width = tx_size_wide[tx];
+      const int tx_height = tx_size_high[tx];
       tell_frac = od_ec_enc_tell_frac(&w->ec);
-#endif // CONFIG_COLLECT_RD_STATS
-      init_token_stats(&token_stats);
       eob_frac =
+#endif // CONFIG_COLLECT_RD_STATS
         pack_mb_tokens(w, tok, tok_end, cm->bit_depth, tx, &token_stats);
 #if CONFIG_COLLECT_RD_STATS
       tell_frac = m->mbmi.skip ? 0 : od_ec_enc_tell_frac(&w->ec) - tell_frac;
       tell_frac <<= AV1_PROB_COST_SHIFT - OD_BITRES; /* (bits in Q9) */
-      args.cpi = cpi;
-      args.m = m;
-      args.px_n = 0;
-      args.px_var_sum = 0;
-      args.px_var_ssq = 0;
-      args.px_dist_ssq = 0;
-      args.tx_n = 0;
-      args.tx_size = 0;
-      args.tx_eob = 0;
-      args.tx_satd = 0;
-      args.tx_dc = 0;
 
-      av1_foreach_transformed_block_in_plane(xd, actual_bsize, plane,
-                                             collect_rd_stats_b, &args);
-
-      printf("%u %u %u   %u %u %u %u   %d %d %d %d   %u %u %u %u %u %u %u "
-             "  %d %u %u %u %d %u\n",
+      printf("%u %u %u   %u %u    %u %u %u %u "
+             "  %lu %lu %u    %u %u\n",
              is_inter_block(&m->mbmi),
              plane,
              av1_get_qindex(&cm->seg, m->mbmi.segment_id, cm->base_qindex),
+
              xd->plane[plane].dequant[0], /* actual DC quantizer */
              xd->plane[plane].dequant[1], /* actual AC quantizer */
-             x->plane[plane].zbin[0],     /* DC quant threshold */
-             x->plane[plane].zbin[1],     /* AC quant threshold */
 
-             (int)(plane == 0 ? get_y_mode(m, 0) : m->mbmi.uv_mode),
-             (int)(plane == 0 ? get_y_mode(m, 1) : -1),
-             (int)(plane == 0 ? get_y_mode(m, 2) : -1),
-             (int)(plane == 0 ? get_y_mode(m, 3) : -1),
-
-             xd->mi[0]->mbmi.sb_type, /* block size / shape index */
-             args.px_n, /* total valid pixels in prediction unit */
+             m->mbmi.sb_type, /* block size / shape index */
+             m->mbmi.pxtx_n[plane], /* total pixels/coeffs in prediction unit */
              (unsigned)m->mbmi.tx_type, /* transform type */
-             args.tx_size, /* transform size */
-             args.tx_n, /* Total coefficients transformed */
-             args.tx_eob, /* Total coefficients coded */
-             eob_frac, /* Approximately how much did the EOB token cost? */
+             tx_width*tx_height,/* transform size */
 
-             args.px_var_sum,
-             args.px_var_ssq,
-             args.px_dist_ssq,
-             args.tx_satd,
-             args.tx_dc,
+             m->mbmi.px_var[plane],
+             m->mbmi.px_dist[plane],
+             m->mbmi.tx_satd[plane],
+
+             eob_frac, /* Approximately how much did the EOB token cost? */
              (unsigned)tell_frac);
 #endif // CONFIG_COLLECT_RD_STATS
 #else

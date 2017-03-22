@@ -235,16 +235,6 @@ typedef struct {
 #if CONFIG_EXT_INTER
   int_mv ref_mv[2];
 #endif  // CONFIG_EXT_INTER
-#if CONFIG_COLLECT_RD_STATS
-  uint32_t px_n[MAX_MB_PLANE];
-  int32_t px_var_sum[MAX_MB_PLANE];
-  uint32_t px_var_ssq[MAX_MB_PLANE];
-  uint32_t px_dist_ssq[MAX_MB_PLANE];
-
-  uint32_t tx_eob[MAX_MB_PLANE];
-  uint32_t tx_satd[MAX_MB_PLANE];
-  int32_t tx_dc[MAX_MB_PLANE];
-#endif
 } b_mode_info;
 
 typedef int8_t MV_REFERENCE_FRAME;
@@ -394,6 +384,13 @@ typedef struct {
 #endif  // CONFIG_WARPED_MOTION
 
   BOUNDARY_TYPE boundary_info;
+#if CONFIG_COLLECT_RD_STATS
+  uint64_t px_var[MAX_MB_PLANE];
+  uint64_t px_dist[MAX_MB_PLANE];
+
+  uint32_t tx_satd[MAX_MB_PLANE];
+  uint32_t pxtx_n[MAX_MB_PLANE];
+#endif
 } MB_MODE_INFO;
 
 typedef struct MODE_INFO {
