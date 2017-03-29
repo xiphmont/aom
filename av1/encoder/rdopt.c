@@ -1356,14 +1356,15 @@ static int rate_block_model(int plane, int block, int blk_row, int blk_col,
                             BLOCK_SIZE bsize, TX_SIZE tx_size,
                             struct rdcost_block_args *args) {
   const AV1_COMP *cpi = args->cpi;
-  const MACROBLOCK *x = &cpi->td.mb;
+  const MACROBLOCK *x = args->x;
   const MACROBLOCKD *const xd = &x->e_mbd;
   const struct macroblock_plane *p = &x->plane[plane];
   const struct macroblockd_plane *const pd = &xd->plane[plane];
   const int tx_width = tx_size_wide[tx_size];
   const int tx_height = tx_size_high[tx_size];
-  const int diff_stride = 4 << b_width_log2_lookup[bsize];
-  const int16_t *diff = p->src_diff + 4*(blk_row*diff_stride + blk_col);
+  const int diff_stride = block_size_wide[bsize];
+  const int16_t *diff = &p->src_diff[(blk_row * diff_stride + blk_col)
+                                     << tx_size_wide_log2[0]];
   const tran_low_t *coeff = BLOCK_OFFSET(p->coeff, block);
   const int n = tx_width*tx_height;
   int i;
@@ -1377,8 +1378,8 @@ static int rate_block_model(int plane, int block, int blk_row, int blk_col,
 #endif  // CONFIG_AOM_HIGHBITDEPTH
                                                     3;
   /* Compute pixel variance from the difference buffer. */
-  int32_t sum = 0;
-  int32_t ssq = 0;
+  int64_t sum = 0;
+  uint64_t ssq = 0;
   for (i = 0; i < tx_height; i++) {
     for (j = 0; j < tx_width; j++) {
       int d = diff[i*diff_stride + j];
@@ -1579,11 +1580,11 @@ static void block_rd_txfm(int plane, int block, int blk_row, int blk_col,
   }
 #if !CONFIG_PVQ
 #if CONFIG_RD_MODEL
-  if (!is_inter_block(mbmi) && plane == 0) {
+  if (!is_inter_block(mbmi) && plane == 0 && mbmi->tx_type==0) {
     int compare=rate_block(plane, block, coeff_ctx, tx_size, args);
     this_rd_stats.rate = rate_block_model(plane, block, blk_row, blk_col,
                                           plane_bsize, tx_size, args);
-    //fprintf(stderr,"txsize=%d old rate=%d, model_rate=%d\n",tx_size,compare,this_rd_stats.rate);
+    //fprintf(stderr,"txsize=%d tx_type=%d plane_bsize=%d oldrate=%d, model_rate=%d\n",tx_size,mbmi->tx_type,plane_bsize,compare,this_rd_stats.rate);
   }else{
 #endif
     this_rd_stats.rate = rate_block(plane, block, coeff_ctx, tx_size, args);

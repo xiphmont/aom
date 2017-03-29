@@ -1170,9 +1170,9 @@ void av1_model_rate_from_var_satd_lapndz(int64_t var, int satd,
 
     *rate = ROUND_POWER_OF_TWO((int)rint((Hval * (1<<(n_log2+10)))*ialpha),
                                10 - AV1_PROB_COST_SHIFT);
-    //fprintf(stderr,"var:%ld stddev:%f satd:%f H:%f slope:%f ialpha:%f rate:%f\n",//
-    //       var, stddev/qstep_unshifted, (float)satd/n/qstep_unshifted,
-    //      Hval,slope,ialpha,*rate/(float)(1<<AV1_PROB_COST_SHIFT));
+    //fprintf(stderr,"var:%ld stddev:%f satd:%f H:%f slope:%f slopei:%d slope_f:%.3f ialpha:%f rate:%f\n",
+    //        var, stddev/qstep_unshifted, (float)satd/n/qstep_unshifted,
+    //      Hval,slope,slope_i,slope_f,ialpha,*rate/(float)(1<<AV1_PROB_COST_SHIFT));
   }
 }
 #endif
