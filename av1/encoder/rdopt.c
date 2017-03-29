@@ -1349,6 +1349,61 @@ static int rate_block(int plane, int block, int coeff_ctx, TX_SIZE tx_size,
                          args->scan_order->neighbors,
                          args->use_fast_coef_costing);
 }
+
+#if CONFIG_RD_MODEL
+/* operates on a _single_ block within a prediction unit */
+static int rate_block_model(int plane, int block, int blk_row, int blk_col,
+                            BLOCK_SIZE bsize, TX_SIZE tx_size,
+                            struct rdcost_block_args *args) {
+  const AV1_COMP *cpi = args->cpi;
+  const MACROBLOCK *x = &cpi->td.mb;
+  const MACROBLOCKD *const xd = &x->e_mbd;
+  const struct macroblock_plane *p = &x->plane[plane];
+  const struct macroblockd_plane *const pd = &xd->plane[plane];
+  const int tx_width = tx_size_wide[tx_size];
+  const int tx_height = tx_size_high[tx_size];
+  const int diff_stride = 4 << b_width_log2_lookup[bsize];
+  const int16_t *diff = p->src_diff + 4*(blk_row*diff_stride + blk_col);
+  const tran_low_t *coeff = BLOCK_OFFSET(p->coeff, block);
+  const int n = tx_width*tx_height;
+  int i;
+  int j;
+
+  //fprintf(stderr,">>macroblock width:%d, height:%d\n",pd->width, pd->height);
+  //fprintf(stderr,">>txsize: %d, coeffs:%d\n",tx_size,tx_size_2d[tx_size]);
+  const int dequant_shift =
+#if CONFIG_AOM_HIGHBITDEPTH
+      (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) ? xd->bd - 5 :
+#endif  // CONFIG_AOM_HIGHBITDEPTH
+                                                    3;
+  /* Compute pixel variance from the difference buffer. */
+  int32_t sum = 0;
+  int32_t ssq = 0;
+  for (i = 0; i < tx_height; i++) {
+    for (j = 0; j < tx_width; j++) {
+      int d = diff[i*diff_stride + j];
+      sum += d;
+      ssq += d*d;
+    }
+  }
+  int64_t variance = ssq - sum*sum/n;
+
+  /* Compute SATD (without DC) */
+  int satd = 0;
+  for (i = 1; i < n; i++) {
+    satd += abs(coeff[i]);
+  }
+
+  int rate;
+  /* do not shift the dequant */
+  av1_model_rate_from_var_satd_lapndz(variance, satd,
+                                      tx_size,
+                                      pd->dequant[1]>>dequant_shift,
+                                      pd->dequant[1],
+                                      &rate);
+  return rate;
+}
+#endif
 #endif  // !CONFIG_PVQ
 
 static uint64_t sum_squares_2d(const int16_t *diff, int diff_stride,
@@ -1523,7 +1578,18 @@ static void block_rd_txfm(int plane, int block, int blk_row, int blk_col,
     return;
   }
 #if !CONFIG_PVQ
-  this_rd_stats.rate = rate_block(plane, block, coeff_ctx, tx_size, args);
+#if CONFIG_RD_MODEL
+  if (!is_inter_block(mbmi) && plane == 0) {
+    int compare=rate_block(plane, block, coeff_ctx, tx_size, args);
+    this_rd_stats.rate = rate_block_model(plane, block, blk_row, blk_col,
+                                          plane_bsize, tx_size, args);
+    //fprintf(stderr,"txsize=%d old rate=%d, model_rate=%d\n",tx_size,compare,this_rd_stats.rate);
+  }else{
+#endif
+    this_rd_stats.rate = rate_block(plane, block, coeff_ctx, tx_size, args);
+#if CONFIG_RD_MODEL
+  }
+#endif
 #if CONFIG_RD_DEBUG
   av1_update_txb_coeff_cost(&this_rd_stats, plane, tx_size, blk_row, blk_col,
                             this_rd_stats.rate);

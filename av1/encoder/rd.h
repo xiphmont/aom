@@ -384,7 +384,13 @@ void av1_initialize_me_consts(const struct AV1_COMP *cpi, MACROBLOCK *x,
 
 void av1_model_rd_from_var_lapndz(int64_t var, unsigned int n,
                                   unsigned int qstep, int *rate, int64_t *dist);
-
+#if CONFIG_RD_MODEL
+void av1_model_rate_from_var_satd_lapndz(int64_t var, int satd,
+                                         TX_SIZE tx_size,
+                                         unsigned int qstep,
+                                         unsigned int qstep_unshifted,
+                                         int *rate);
+#endif
 int av1_get_switchable_rate(const struct AV1_COMP *cpi, const MACROBLOCKD *xd);
 
 int av1_raster_block_offset(BLOCK_SIZE plane_bsize, int raster_block,
