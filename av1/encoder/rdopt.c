@@ -1365,7 +1365,9 @@ static int rate_block_model(int plane, int block, int blk_row, int blk_col,
   const int diff_stride = block_size_wide[bsize];
   const int16_t *diff = &p->src_diff[(blk_row * diff_stride + blk_col)
                                      << tx_size_wide_log2[0]];
-  const tran_low_t *coeff = BLOCK_OFFSET(p->coeff, block);
+  const tran_low_t *const coeff = BLOCK_OFFSET(p->coeff, block);
+  const tran_low_t *const qcoeff = BLOCK_OFFSET(p->qcoeff, block);
+  const tran_low_t *const dqcoeff = BLOCK_OFFSET(pd->dqcoeff, block);
   const int n = tx_width*tx_height;
   int i;
   int j;
@@ -1394,7 +1396,42 @@ static int rate_block_model(int plane, int block, int blk_row, int blk_col,
   for (i = 1; i < n; i++) {
     satd += abs(coeff[i]);
   }
+#if 0
+  if(satd/(float)n/pd->dequant[1] > 8 &&  (sqrtf(variance/(float)n)/pd->dequant[1]) <1){
 
+    fprintf(stderr,">>>BOOM: satd=%f stddev=%f\n", satd/(float)n/pd->dequant[1],
+            sqrtf(variance/(float)n)/pd->dequant[1]);
+    fprintf(stderr,">>>DIFF\n");
+    for (i = 0; i < tx_height; i++) {
+      for (j = 0; j < tx_width; j++) {
+        fprintf(stderr,"%d ",diff[i*diff_stride + j]);
+      }
+      fprintf(stderr,"\n");
+    }
+    fprintf(stderr,">>>COEFF\n");
+    for (i = 0; i < tx_height; i++) {
+      for (j = 0; j < tx_width; j++) {
+        fprintf(stderr,"%d ",coeff[i*tx_width + j]);
+      }
+      fprintf(stderr,"\n");
+    }
+    fprintf(stderr,">>>QCOEFF\n");
+    for (i = 0; i < tx_height; i++) {
+      for (j = 0; j < tx_width; j++) {
+        fprintf(stderr,"%d ",qcoeff[i*tx_width + j]);
+      }
+      fprintf(stderr,"\n");
+    }
+    fprintf(stderr,">>>DQCOEFF\n");
+    for (i = 0; i < tx_height; i++) {
+      for (j = 0; j < tx_width; j++) {
+        fprintf(stderr,"%d ",dqcoeff[i*tx_width + j]);
+      }
+      fprintf(stderr,"\n");
+    }
+  }
+      fprintf(stderr,"\n");
+#endif  
   int rate;
   /* do not shift the dequant */
   av1_model_rate_from_var_satd_lapndz(variance, satd,
@@ -1580,10 +1617,11 @@ static void block_rd_txfm(int plane, int block, int blk_row, int blk_col,
   }
 #if !CONFIG_PVQ
 #if CONFIG_RD_MODEL
-  if (!is_inter_block(mbmi) && plane == 0 && mbmi->tx_type==0) {
+  if (!is_inter_block(mbmi) && plane == 0){// && mbmi->tx_type==0) {
     int compare=rate_block(plane, block, coeff_ctx, tx_size, args);
     this_rd_stats.rate = rate_block_model(plane, block, blk_row, blk_col,
                                           plane_bsize, tx_size, args);
+    if(this_rd_stats.rate < 0)this_rd_stats.rate = compare;
     //fprintf(stderr,"txsize=%d tx_type=%d plane_bsize=%d oldrate=%d, model_rate=%d\n",tx_size,mbmi->tx_type,plane_bsize,compare,this_rd_stats.rate);
   }else{
 #endif

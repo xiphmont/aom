@@ -1163,6 +1163,10 @@ void av1_model_rate_from_var_satd_lapndz(int64_t var, int satd,
              (int)(1<<15)-1));
     //fprintf(stderr,"slope:%f slope_q10:%d\n",slope,slope_q16);
     const int slope_i = slope_q16 >> 6;
+    if(slope_i<30){
+      *rate == -1;
+      return;
+    }
     const float slope_f = (slope_q16 & 0x3f)*.015625f;
     const float *ialpha_tab = ialpha_tabs[tx_size];
     const float ialpha = (ialpha_tab[slope_i] * (1.f-slope_f) +
