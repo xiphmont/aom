@@ -892,7 +892,7 @@ static int pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
     /* skip one or two nodes */
     if (!p->skip_eob_node){
       if(token == EOB_TOKEN)
-        cost = av1_cost_bit(p->context_tree[0], 0);
+        cost += av1_cost_bit(p->context_tree[0], 0);
       aom_write_record(w, token != EOB_TOKEN, p->context_tree[0], token_stats);
     }
     if (token != EOB_TOKEN) {
@@ -908,7 +908,7 @@ static int pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
       coef_length -= p->skip_eob_node;
     else{
       if(token == EOB_TOKEN)
-        cost = av1_cost_bit(p->context_tree[0], 0);
+        cost += av1_cost_bit(p->context_tree[0], 0);
       aom_write_record(w, token != EOB_TOKEN, p->context_tree[0], token_stats);
     }
 
