@@ -911,14 +911,16 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
   }
 
   *tp = p;
+  return cost;
 }
 #else  //  CONFIG_NEW_TOKENSET
 #if !CONFIG_LV_MAP
-static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
+static int pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
                            const TOKENEXTRA *const stop,
                            aom_bit_depth_t bit_depth, const TX_SIZE tx_size,
                            TOKEN_STATS *token_stats) {
   const TOKENEXTRA *p = *tp;
+  int cost = 0;
 #if CONFIG_VAR_TX
   int count = 0;
   const int seg_eob = tx_size_2d[tx_size];
@@ -935,8 +937,11 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
 
 #if CONFIG_EC_MULTISYMBOL
     /* skip one or two nodes */
-    if (!p->skip_eob_node)
+    if (!p->skip_eob_node){
+      if(token == EOB_TOKEN)
+        cost += av1_cost_bit(p->context_tree[0], 0);
       aom_write_record(w, token != EOB_TOKEN, p->context_tree[0], token_stats);
+    }
     if (token != EOB_TOKEN) {
       aom_write_record(w, token != ZERO_TOKEN, p->context_tree[1], token_stats);
       if (token != ZERO_TOKEN) {
@@ -948,8 +953,11 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
     /* skip one or two nodes */
     if (p->skip_eob_node)
       coef_length -= p->skip_eob_node;
-    else
+    else{
+      if(token == EOB_TOKEN)
+        cost += av1_cost_bit(p->context_tree[0], 0);
       aom_write_record(w, token != EOB_TOKEN, p->context_tree[0], token_stats);
+    }
 
     if (token != EOB_TOKEN) {
       aom_write_record(w, token != ZERO_TOKEN, p->context_tree[1], token_stats);
@@ -1001,6 +1009,7 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
   }
 
   *tp = p;
+  return cost;
 }
 #endif  // !CONFIG_LV_MAP
 #endif  // CONFIG_NEW_TOKENSET
@@ -2227,6 +2236,7 @@ static void write_mbmi_b(AV1_COMP *cpi, const TileInfo *const tile,
   MACROBLOCKD *const xd = &cpi->td.mb.e_mbd;
   MODE_INFO *m;
   int bh, bw;
+
   xd->mi = cm->mi_grid_visible + (mi_row * cm->mi_stride + mi_col);
   m = xd->mi[0];
 
@@ -2429,6 +2439,7 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
       }
 #endif
 #if CONFIG_VAR_TX
+    if (!m->mbmi.skip) {
       const struct macroblockd_plane *const pd = &xd->plane[plane];
       BLOCK_SIZE bsize = mbmi->sb_type;
 #if CONFIG_CB4X4
@@ -2498,13 +2509,45 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
       TOKEN_STATS token_stats;
 #if !CONFIG_PVQ
       init_token_stats(&token_stats);
+#if CONFIG_COLLECT_RD_STATS
+      int tell_frac;
+      unsigned eob_frac = 0;
+      const int tx_width = tx_size_wide[tx];
+      const int tx_height = tx_size_high[tx];
+      tell_frac = od_ec_enc_tell_frac(&w->ec);
+      eob_frac =
+#endif // CONFIG_COLLECT_RD_STATS
 #if CONFIG_LV_MAP
       (void)tx;
       av1_write_coeffs_mb(cm, x, w, plane);
 #else   // CONFIG_LV_MAP
       pack_mb_tokens(w, tok, tok_end, cm->bit_depth, tx, &token_stats);
 #endif  // CONFIG_LV_MAP
+#if CONFIG_COLLECT_RD_STATS
+      tell_frac = m->mbmi.skip ? 0 : od_ec_enc_tell_frac(&w->ec) - tell_frac;
+      tell_frac <<= AV1_PROB_COST_SHIFT - OD_BITRES; /* (bits in Q9) */
 
+      printf("%u %u %u   %u %u    %u %u %u %u "
+             "  %lu %lu %u    %u %u\n",
+             is_inter_block(&m->mbmi),
+             plane,
+             av1_get_qindex(&cm->seg, m->mbmi.segment_id, cm->base_qindex),
+
+             xd->plane[plane].dequant[0], /* actual DC quantizer */
+             xd->plane[plane].dequant[1], /* actual AC quantizer */
+
+             m->mbmi.sb_type, /* block size / shape index */
+             m->mbmi.pxtx_n[plane], /* total pixels/coeffs in prediction unit */
+             (unsigned)m->mbmi.tx_type, /* transform type */
+             tx_width*tx_height,/* transform size */
+
+             m->mbmi.px_var[plane],
+             m->mbmi.px_dist[plane],
+             m->mbmi.tx_satd[plane],
+
+             eob_frac, /* Approximately how much did the EOB token cost? */
+             (unsigned)tell_frac);
+#endif // CONFIG_COLLECT_RD_STATS
 #else
       (void)token_stats;
       pack_pvq_tokens(w, x, xd, plane, mbmi->sb_type, tx);

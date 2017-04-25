@@ -1509,6 +1509,99 @@ void av1_dist_block(const AV1_COMP *cpi, MACROBLOCK *x, int plane,
   }
 }
 
+#if CONFIG_RD_MODEL
+/* operates on a _single_ block within a prediction unit */
+static int rate_block_model(int plane, int block, int blk_row, int blk_col,
+                            BLOCK_SIZE bsize, TX_SIZE tx_size,
+                            struct rdcost_block_args *args) {
+  const AV1_COMP *cpi = args->cpi;
+  const MACROBLOCK *x = args->x;
+  const MACROBLOCKD *const xd = &x->e_mbd;
+  const struct macroblock_plane *p = &x->plane[plane];
+  const struct macroblockd_plane *const pd = &xd->plane[plane];
+  const int tx_width = tx_size_wide[tx_size];
+  const int tx_height = tx_size_high[tx_size];
+  const int diff_stride = block_size_wide[bsize];
+  const int16_t *diff = &p->src_diff[(blk_row * diff_stride + blk_col)
+                                     << tx_size_wide_log2[0]];
+  const tran_low_t *const coeff = BLOCK_OFFSET(p->coeff, block);
+  const tran_low_t *const qcoeff = BLOCK_OFFSET(p->qcoeff, block);
+  const tran_low_t *const dqcoeff = BLOCK_OFFSET(pd->dqcoeff, block);
+  const int n = tx_width*tx_height;
+  int i;
+  int j;
+
+  //fprintf(stderr,">>macroblock width:%d, height:%d\n",pd->width, pd->height);
+  //fprintf(stderr,">>txsize: %d, coeffs:%d\n",tx_size,tx_size_2d[tx_size]);
+  const int dequant_shift =
+#if CONFIG_AOM_HIGHBITDEPTH
+      (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) ? xd->bd - 5 :
+#endif  // CONFIG_AOM_HIGHBITDEPTH
+                                                    3;
+  /* Compute pixel variance from the difference buffer. */
+  int64_t sum = 0;
+  uint64_t ssq = 0;
+  for (i = 0; i < tx_height; i++) {
+    for (j = 0; j < tx_width; j++) {
+      int d = diff[i*diff_stride + j];
+      sum += d;
+      ssq += d*d;
+    }
+  }
+  int64_t variance = ssq - sum*sum/n;
+
+  /* Compute SATD (without DC) */
+  int satd = 0;
+  for (i = 1; i < n; i++) {
+    satd += abs(coeff[i]);
+  }
+#if 0
+  if(satd/(float)n/pd->dequant[1] > 8 &&  (sqrtf(variance/(float)n)/pd->dequant[1]) <1){
+
+    fprintf(stderr,">>>BOOM: satd=%f stddev=%f\n", satd/(float)n/pd->dequant[1],
+            sqrtf(variance/(float)n)/pd->dequant[1]);
+    fprintf(stderr,">>>DIFF\n");
+    for (i = 0; i < tx_height; i++) {
+      for (j = 0; j < tx_width; j++) {
+        fprintf(stderr,"%d ",diff[i*diff_stride + j]);
+      }
+      fprintf(stderr,"\n");
+    }
+    fprintf(stderr,">>>COEFF\n");
+    for (i = 0; i < tx_height; i++) {
+      for (j = 0; j < tx_width; j++) {
+        fprintf(stderr,"%d ",coeff[i*tx_width + j]);
+      }
+      fprintf(stderr,"\n");
+    }
+    fprintf(stderr,">>>QCOEFF\n");
+    for (i = 0; i < tx_height; i++) {
+      for (j = 0; j < tx_width; j++) {
+        fprintf(stderr,"%d ",qcoeff[i*tx_width + j]);
+      }
+      fprintf(stderr,"\n");
+    }
+    fprintf(stderr,">>>DQCOEFF\n");
+    for (i = 0; i < tx_height; i++) {
+      for (j = 0; j < tx_width; j++) {
+        fprintf(stderr,"%d ",dqcoeff[i*tx_width + j]);
+      }
+      fprintf(stderr,"\n");
+    }
+  }
+      fprintf(stderr,"\n");
+#endif  
+  int rate;
+  /* do not shift the dequant */
+  av1_model_rate_from_var_satd_lapndz(variance, satd,
+                                      tx_size,
+                                      pd->dequant[1]>>dequant_shift,
+                                      pd->dequant[1],
+                                      &rate);
+  return rate;
+}
+#endif
+
 static void block_rd_txfm(int plane, int block, int blk_row, int blk_col,
                           BLOCK_SIZE plane_bsize, TX_SIZE tx_size, void *arg) {
   struct rdcost_block_args *args = arg;
@@ -1561,13 +1654,29 @@ static void block_rd_txfm(int plane, int block, int blk_row, int blk_col,
     return;
   }
 #if !CONFIG_PVQ
+
   PLANE_TYPE plane_type = get_plane_type(plane);
   TX_TYPE tx_type = get_tx_type(plane_type, xd, block, tx_size);
   const SCAN_ORDER *scan_order =
       get_scan(cm, tx_size, tx_type, is_inter_block(mbmi));
-  this_rd_stats.rate =
+#if CONFIG_RD_MODEL
+  if (!is_inter_block(mbmi) && plane == 0){// && mbmi->tx_type==0) {
+    int compare =
       av1_cost_coeffs(cpi, x, plane, block, tx_size, scan_order, a, l,
                       args->use_fast_coef_costing);
+    this_rd_stats.rate = rate_block_model(plane, block, blk_row, blk_col,
+                                          plane_bsize, tx_size, args);
+    if(this_rd_stats.rate < 0)this_rd_stats.rate = compare;
+    //fprintf(stderr,"txsize=%d tx_type=%d plane_bsize=%d oldrate=%d, model_rate=%d\n",tx_size,mbmi->tx_type,plane_bsize,compare,this_rd_stats.rate);
+  }else{
+#endif
+    this_rd_stats.rate =
+      av1_cost_coeffs(cpi, x, plane, block, tx_size, scan_order, a, l,
+                      args->use_fast_coef_costing);
+#if CONFIG_RD_MODEL
+  }
+#endif
+
 #else   // !CONFIG_PVQ
   this_rd_stats.rate = x->rate;
 #endif  // !CONFIG_PVQ
@@ -1578,6 +1687,7 @@ static void block_rd_txfm(int plane, int block, int blk_row, int blk_col,
 #endif  // !CONFIG_TXK_SEL
 
 #if !CONFIG_PVQ
+
 #if CONFIG_RD_DEBUG
   av1_update_txb_coeff_cost(&this_rd_stats, plane, tx_size, blk_row, blk_col,
                             this_rd_stats.rate);

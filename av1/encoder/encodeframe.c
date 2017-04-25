@@ -69,6 +69,9 @@
 #else
 #define IF_HBD(...)
 #endif  // CONFIG_HIGHBITDEPTH
+#if CONFIG_COLLECT_RD_STATS
+#include "hybrid_fwd_txfm.h"
+#endif
 
 static void encode_superblock(const AV1_COMP *const cpi, ThreadData *td,
                               TOKENEXTRA **t, RUN_TYPE dry_run, int mi_row,
@@ -5874,6 +5877,84 @@ void av1_update_tx_type_count(const AV1_COMMON *cm, MACROBLOCKD *xd,
 #endif  // CONFIG_EXT_TX
 }
 
+#if CONFIG_COLLECT_RD_STATS
+typedef struct collect_rd_stats_args {
+  const AV1_COMP *cpi;
+  int mi_row;
+  int mi_col;
+  MODE_INFO *m;
+} collect_rd_stats_args;
+
+static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
+                               BLOCK_SIZE plane_bsize, TX_SIZE tx_size,
+                               void *arg) {
+  collect_rd_stats_args *args = (collect_rd_stats_args *)arg;
+  const AV1_COMP *cpi = args->cpi;
+  const AV1_COMMON *cm = cm = &cpi->common;
+  const MACROBLOCK *x = &cpi->td.mb;
+  const MACROBLOCKD *xd = &x->e_mbd;
+  const struct macroblock_plane *p = &x->plane[plane];
+  const struct macroblockd_plane *pd = &xd->plane[plane];
+  const int tx_width = tx_size_wide[tx_size];
+  const int tx_height = tx_size_high[tx_size];
+  const tran_low_t *coeff = BLOCK_OFFSET(p->coeff, block);
+  const int src_stride = p->src.stride;
+  const int rec_stride = pd->dst.stride;
+  const int diff_stride = block_size_wide[plane_bsize];
+  const uint8_t *src =
+    &p->src.buf[(blk_row * src_stride + blk_col) << tx_size_wide_log2[0]];
+  const uint8_t *rec =
+    &pd->dst.buf[(blk_row * rec_stride + blk_col) << tx_size_wide_log2[0]];
+  const int16_t *diff = &p->src_diff[(blk_row * diff_stride + blk_col)
+                                     << tx_size_wide_log2[0]];
+  int i;
+  int j;
+  int n = tx_width*tx_height;
+  int32_t sum;
+  uint64_t ssq;
+
+  if (block == 0) {
+    args->m->mbmi.pxtx_n[plane] = 0;
+    args->m->mbmi.px_var[plane] = 0;
+    args->m->mbmi.px_dist[plane] = 0;
+    args->m->mbmi.tx_satd[plane] = 0;
+  }
+
+  args->m->mbmi.pxtx_n[plane] += n;
+
+  /* Compute pixel distortion. */
+  ssq = 0;
+  for (i = 0; i < tx_height; i++) {
+    for (j = 0; j < tx_width; j++) {
+      int d = src[i*src_stride + j] - rec[i*rec_stride + j];
+      ssq += d*d;
+    }
+  }
+  args->m->mbmi.px_dist[plane] += ssq;
+
+  /* Compute pixel variance from the difference buffer. */
+  sum = 0;
+  ssq = 0;
+  for (i = 0; i < tx_height; i++) {
+    for (j = 0; j < tx_width; j++) {
+      int d = diff[i*diff_stride + j];
+      sum += d;
+      ssq += d*d;
+    }
+  }
+  args->m->mbmi.px_var[plane] += ssq*n - sum*sum;
+
+  /* Compute SATD (without DC, stored separately) */
+  sum = 0;
+  for (i = 1; i < n; i++) {
+    sum += abs(coeff[i]);
+  }
+
+  args->m->mbmi.tx_satd[plane] += sum;
+
+}
+#endif
+
 static void encode_superblock(const AV1_COMP *const cpi, ThreadData *td,
                               TOKENEXTRA **t, RUN_TYPE dry_run, int mi_row,
                               int mi_col, BLOCK_SIZE bsize,
@@ -6020,6 +6101,25 @@ static void encode_superblock(const AV1_COMP *const cpi, ThreadData *td,
 #endif  // CONFIG_LV_MAP
 #endif
   }
+
+  /* RD Modeling data collection */
+#if CONFIG_COLLECT_RD_STATS
+  if (dry_run == OUTPUT_ENABLED) {
+    int plane;
+    collect_rd_stats_args args;
+    args.m = mi;
+    args.cpi = cpi;
+    args.mi_row = mi_row;
+    args.mi_col = mi_col;
+
+    for (plane = 0; plane < MAX_MB_PLANE; ++plane){
+      const BLOCK_SIZE plane_bsize =
+        get_plane_block_size(block_size, &xd->plane[plane]);
+      av1_foreach_transformed_block_in_plane(xd, plane_bsize, plane,
+                                             collect_rd_stats_b, &args);
+    }
+  }
+#endif
 
   if (!dry_run) {
 #if CONFIG_VAR_TX

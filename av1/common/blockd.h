@@ -401,6 +401,13 @@ typedef struct {
 #endif  // CONFIG_WARPED_MOTION
 
   BOUNDARY_TYPE boundary_info;
+#if CONFIG_COLLECT_RD_STATS
+  uint64_t px_var[MAX_MB_PLANE];
+  uint64_t px_dist[MAX_MB_PLANE];
+
+  uint32_t tx_satd[MAX_MB_PLANE];
+  uint32_t pxtx_n[MAX_MB_PLANE];
+#endif
 } MB_MODE_INFO;
 
 typedef struct MODE_INFO {
