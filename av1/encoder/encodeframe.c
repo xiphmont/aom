@@ -5880,8 +5880,10 @@ void av1_update_tx_type_count(const AV1_COMMON *cm, MACROBLOCKD *xd,
 #if CONFIG_COLLECT_RD_STATS
 typedef struct collect_rd_stats_args {
   const AV1_COMP *cpi;
+  MACROBLOCK *x;
   int mi_row;
   int mi_col;
+  int count;
   MODE_INFO *m;
 } collect_rd_stats_args;
 
@@ -5891,10 +5893,10 @@ static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
   collect_rd_stats_args *args = (collect_rd_stats_args *)arg;
   const AV1_COMP *cpi = args->cpi;
   const AV1_COMMON *cm = cm = &cpi->common;
-  const MACROBLOCK *x = &cpi->td.mb;
-  const MACROBLOCKD *xd = &x->e_mbd;
-  const struct macroblock_plane *p = &x->plane[plane];
-  const struct macroblockd_plane *pd = &xd->plane[plane];
+  MACROBLOCK *const x = args->x;
+  MACROBLOCKD *xd = &x->e_mbd;
+  struct macroblock_plane *p = &x->plane[plane];
+  struct macroblockd_plane *pd = &xd->plane[plane];
   const int tx_width = tx_size_wide[tx_size];
   const int tx_height = tx_size_high[tx_size];
   const tran_low_t *coeff = BLOCK_OFFSET(p->coeff, block);
@@ -5912,15 +5914,11 @@ static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
   int n = tx_width*tx_height;
   int32_t sum;
   uint64_t ssq;
+  int count = args->count;
 
-  if (block == 0) {
-    args->m->mbmi.pxtx_n[plane] = 0;
-    args->m->mbmi.px_var[plane] = 0;
-    args->m->mbmi.px_dist[plane] = 0;
-    args->m->mbmi.tx_satd[plane] = 0;
-  }
-
-  args->m->mbmi.pxtx_n[plane] += n;
+  args->m->rd_blockz_cost[plane][count] = 0;
+  args->m->rd_coeff_cost[plane][count] = 0;
+  args->m->rd_tx_coded[plane][count] = p->eobs[block];
 
   /* Compute pixel distortion. */
   ssq = 0;
@@ -5930,7 +5928,7 @@ static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
       ssq += d*d;
     }
   }
-  args->m->mbmi.px_dist[plane] += ssq;
+  args->m->rd_px_dist[plane][count] = ssq;
 
   /* Compute pixel variance from the difference buffer. */
   sum = 0;
@@ -5942,16 +5940,16 @@ static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
       ssq += d*d;
     }
   }
-  args->m->mbmi.px_var[plane] += ssq*n - sum*sum;
+  args->m->rd_px_var[plane][count] = ssq*n - sum*sum;
 
   /* Compute SATD (without DC, stored separately) */
   sum = 0;
   for (i = 1; i < n; i++) {
     sum += abs(coeff[i]);
   }
+  args->m->rd_tx_satd[plane][count] = sum;
 
-  args->m->mbmi.tx_satd[plane] += sum;
-
+  args->count++;
 }
 #endif
 
@@ -6107,15 +6105,14 @@ static void encode_superblock(const AV1_COMP *const cpi, ThreadData *td,
   if (dry_run == OUTPUT_ENABLED) {
     int plane;
     collect_rd_stats_args args;
-    args.m = mi;
     args.cpi = cpi;
+    args.x = x;
+    args.m = mi;
     args.mi_row = mi_row;
     args.mi_col = mi_col;
-
     for (plane = 0; plane < MAX_MB_PLANE; ++plane){
-      const BLOCK_SIZE plane_bsize =
-        get_plane_block_size(block_size, &xd->plane[plane]);
-      av1_foreach_transformed_block_in_plane(xd, plane_bsize, plane,
+      args.count = 0;
+      av1_foreach_transformed_block_in_plane(xd, bsize, plane,
                                              collect_rd_stats_b, &args);
     }
   }

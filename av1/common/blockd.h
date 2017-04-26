@@ -399,20 +399,20 @@ typedef struct {
   int num_proj_ref[2];
   WarpedMotionParams wm_params[2];
 #endif  // CONFIG_WARPED_MOTION
-
   BOUNDARY_TYPE boundary_info;
-#if CONFIG_COLLECT_RD_STATS
-  uint64_t px_var[MAX_MB_PLANE];
-  uint64_t px_dist[MAX_MB_PLANE];
-
-  uint32_t tx_satd[MAX_MB_PLANE];
-  uint32_t pxtx_n[MAX_MB_PLANE];
-#endif
 } MB_MODE_INFO;
 
 typedef struct MODE_INFO {
   MB_MODE_INFO mbmi;
   b_mode_info bmi[4];
+#if CONFIG_COLLECT_RD_STATS
+  uint64_t rd_px_var[MAX_MB_PLANE][MAX_MIB_SIZE*MAX_MIB_SIZE];
+  uint64_t rd_px_dist[MAX_MB_PLANE][MAX_MIB_SIZE*MAX_MIB_SIZE];
+  uint32_t rd_tx_satd[MAX_MB_PLANE][MAX_MIB_SIZE*MAX_MIB_SIZE];
+  uint32_t rd_tx_coded[MAX_MB_PLANE][MAX_MIB_SIZE*MAX_MIB_SIZE];
+  uint32_t rd_blockz_cost[MAX_MB_PLANE][MAX_MIB_SIZE*MAX_MIB_SIZE];
+  uint32_t rd_coeff_cost[MAX_MB_PLANE][MAX_MIB_SIZE*MAX_MIB_SIZE];
+#endif
 } MODE_INFO;
 
 #if CONFIG_INTRABC
