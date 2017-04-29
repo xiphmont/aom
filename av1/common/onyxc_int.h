@@ -149,6 +149,19 @@ typedef struct BufferPool {
   InternalFrameBufferList int_frame_buffers;
 } BufferPool;
 
+#if CONFIG_COLLECT_RD_MODEL
+typedef struct COLLECT_RD COLLECT_RD;
+struct COLLECT_RD {
+  uint64_t rd_px_var[MAX_MB_PLANE];
+  uint64_t rd_px_dist[MAX_MB_PLANE];
+  uint32_t rd_tx_satd[MAX_MB_PLANE];
+  uint32_t rd_tx_coded[MAX_MB_PLANE];
+  uint32_t rd_blockz_cost[MAX_MB_PLANE];
+  uint32_t rd_coeff_cost[MAX_MB_PLANE];
+  struct COLLECT_RD *next[MAX_MB_PLANE];
+};
+#endif
+
 typedef struct AV1Common {
   struct aom_internal_error_info error;
   aom_color_space_t color_space;
@@ -257,6 +270,10 @@ typedef struct AV1Common {
   int mi_alloc_size;
   MODE_INFO *mip; /* Base of allocated array */
   MODE_INFO *mi;  /* Corresponds to upper left visible macroblock */
+#if CONFIG_COLLECT_RD_MODEL
+  COLLECT_RD *rdp; /* RD model data collection storage; one entry for
+                      every possible block */
+#endif
 
   // TODO(agrange): Move prev_mi into encoder structure.
   // prev_mip and prev_mi will only be allocated in encoder.

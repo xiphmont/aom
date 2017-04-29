@@ -322,7 +322,7 @@ EXPERIMENT_LIST="
     new_multisymbol
     compound_singleref
     rd_model
-    collect_rd_stats
+    collect_rd_model
 "
 CONFIG_LIST="
     dependency_tracking

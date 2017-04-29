@@ -405,14 +405,6 @@ typedef struct {
 typedef struct MODE_INFO {
   MB_MODE_INFO mbmi;
   b_mode_info bmi[4];
-#if CONFIG_COLLECT_RD_STATS
-  uint64_t rd_px_var[MAX_MB_PLANE][MAX_MIB_SIZE*MAX_MIB_SIZE];
-  uint64_t rd_px_dist[MAX_MB_PLANE][MAX_MIB_SIZE*MAX_MIB_SIZE];
-  uint32_t rd_tx_satd[MAX_MB_PLANE][MAX_MIB_SIZE*MAX_MIB_SIZE];
-  uint32_t rd_tx_coded[MAX_MB_PLANE][MAX_MIB_SIZE*MAX_MIB_SIZE];
-  uint32_t rd_blockz_cost[MAX_MB_PLANE][MAX_MIB_SIZE*MAX_MIB_SIZE];
-  uint32_t rd_coeff_cost[MAX_MB_PLANE][MAX_MIB_SIZE*MAX_MIB_SIZE];
-#endif
 } MODE_INFO;
 
 #if CONFIG_INTRABC
