@@ -2373,13 +2373,15 @@ static void write_rd_stats_b(int plane, int block, int blk_row, int blk_col,
   MB_MODE_INFO *mbmi = &xd->mi[0]->mbmi;
   (void)plane_bsize;
   (void)block;
-  printf("%u %u %u %u  %u %u %u  %lu %lu %u  %u %u %u\n",
+  printf("%u %u %u %u  %u %u %u %u %u  %lu %lu %u  %u %u %u\n",
          is_inter_block(mbmi),
          plane,
          av1_get_qindex(&cm->seg, mbmi->segment_id, cm->base_qindex),
          pd->dequant[1], /* actual AC quantizer */
 
          n, /* total pixels/coeffs in tx block */
+         (unsigned)mbmi->sb_type,
+         (unsigned)mbmi->mode,
          (unsigned)mbmi->tx_type, /* transform type */
          rdc->rd_tx_coded[plane], /* coded pixels (eob) */
 
