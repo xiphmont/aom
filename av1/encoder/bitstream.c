@@ -827,6 +827,61 @@ static int aom_cost_symbol(int symb, const aom_cdf_prob *cdf, int n){
   if (symb > 0) prob_num -= cdf[symb - 1];
   return av1_cost_zero(get_prob(prob_num, prob_den));
 }
+
+#if CONFIG_EC_MULTISYMBOL
+static int aom_cost_tree_as_cdf(const aom_tree_index *tree,
+                                 const aom_prob *probs, int bits,
+                                 int len, aom_tree_index i) {
+  int cost = 0;
+  aom_tree_index root;
+  root = i;
+  do {
+    aom_cdf_prob cdf[16];
+    aom_tree_index index[16];
+    int path[16];
+    int dist[16];
+    int nsymbs;
+    int symb;
+    int j;
+    /* Compute the CDF of the binary tree using the given probabilities. */
+    nsymbs = tree_to_cdf(tree, probs, root, cdf, index, path, dist);
+    /* Find the symbol to code. */
+    symb = -1;
+    for (j = 0; j < nsymbs; j++) {
+      /* If this symbol codes a leaf node,  */
+      if (index[j] <= 0) {
+        if (len == dist[j] && path[j] == bits) {
+          symb = j;
+          break;
+        }
+      } else {
+        if (len > dist[j] && path[j] == bits >> (len - dist[j])) {
+          symb = j;
+          break;
+        }
+      }
+    }
+    OD_ASSERT(symb != -1);
+    cost += aom_cost_symbol(symb, cdf, nsymbs);
+    bits &= (1 << (len - dist[symb])) - 1;
+    len -= dist[symb];
+  } while (len);
+  return cost;
+}
+#else
+static int aom_cost_tree_as_bits(const aom_tree_index *tr,
+                                 const aom_prob *probs, int bits,
+                                 int len, aom_tree_index i) {
+  int cost = 0;
+  do {
+    const int bit = (bits >> --len) & 1;
+    cost += av1_cost_bit(probs[i >> 1], bit);
+    i = tr[i + bit];
+  } while (len);
+  return cost;
+}
+#endif
+
 #endif
 
 #if CONFIG_NEW_MULTISYMBOL
@@ -969,6 +1024,10 @@ static void pack_mb_tokens(aom_writer *w,
 #else  //  CONFIG_NEW_TOKENSET
 #if !CONFIG_LV_MAP
 static void pack_mb_tokens(aom_writer *w,
+#if CONFIG_COLLECT_RD_MODEL
+                           COLLECT_RD *rdc,
+                           int plane,
+#endif
                            const TOKENEXTRA **tp,
                            const TOKENEXTRA *const stop,
                            aom_bit_depth_t bit_depth, const TX_SIZE tx_size,
@@ -990,12 +1049,26 @@ static void pack_mb_tokens(aom_writer *w,
 
 #if CONFIG_EC_MULTISYMBOL
     /* skip one or two nodes */
-    if (!p->skip_eob_node)
+    if (!p->skip_eob_node) {
+#if CONFIG_COLLECT_RD_MODEL
+      rdc->rd_blockz_cost[plane] =
+        av1_cost_bit(p->context_tree[0], token != EOB_TOKEN);
+#endif
       aom_write_record(w, token != EOB_TOKEN, p->context_tree[0], token_stats);
+    }
 
     if (token != EOB_TOKEN) {
+#if CONFIG_COLLECT_RD_MODEL
+      rdc->rd_coeff_cost[plane] +=
+        av1_cost_bit(p->context_tree[1], token != ZERO_TOKEN);
+#endif
       aom_write_record(w, token != ZERO_TOKEN, p->context_tree[1], token_stats);
       if (token != ZERO_TOKEN) {
+#if CONFIG_COLLECT_RD_MODEL
+        rdc->rd_coeff_cost[plane] +=
+          aom_cost_symbol(token - ONE_TOKEN, *p->token_cdf,
+                          CATEGORY6_TOKEN - ONE_TOKEN + 1);
+#endif
         aom_write_symbol(w, token - ONE_TOKEN, *p->token_cdf,
                          CATEGORY6_TOKEN - ONE_TOKEN + 1);
       }
@@ -1004,18 +1077,43 @@ static void pack_mb_tokens(aom_writer *w,
     /* skip one or two nodes */
     if (p->skip_eob_node)
       coef_length -= p->skip_eob_node;
-    else
+    else {
+#if CONFIG_COLLECT_RD_MODEL
+      rdc->rd_blockz_cost[plane] =
+        av1_cost_bit(p->context_tree[0], token != EOB_TOKEN);
+#endif
       aom_write_record(w, token != EOB_TOKEN, p->context_tree[0], token_stats);
+    }
 
     if (token != EOB_TOKEN) {
+#if CONFIG_COLLECT_RD_MODEL
+      rdc->rd_coeff_cost[plane] +=
+        av1_cost_bit(p->context_tree[1], token != ZERO_TOKEN);
+#endif
       aom_write_record(w, token != ZERO_TOKEN, p->context_tree[1], token_stats);
 
       if (token != ZERO_TOKEN) {
+#if CONFIG_COLLECT_RD_MODEL
+        rdc->rd_coeff_cost[plane] +=
+          av1_cost_bit(p->context_tree[2], token != ONE_TOKEN);
+#endif
         aom_write_record(w, token != ONE_TOKEN, p->context_tree[2],
                          token_stats);
 
         if (token != ONE_TOKEN) {
           const int unconstrained_len = UNCONSTRAINED_NODES - p->skip_eob_node;
+#if CONFIG_COLLECT_RD_MODEL
+          rdc->rd_coeff_cost[plane] +=
+#if CONFIG_EC_MULTISYMBOL
+            aom_cost_tree_as_cdf(av1_coef_con_tree,
+              av1_pareto8_full[p->context_tree[PIVOT_NODE] - 1], coef_value,
+              coef_length - unconstrained_len, 0);
+#else
+          aom_cost_tree_as_bits(av1_coef_con_tree,
+              av1_pareto8_full[p->context_tree[PIVOT_NODE] - 1], coef_value,
+              coef_length - unconstrained_len, 0);
+#endif
+#endif
           aom_write_tree_record(
               w, av1_coef_con_tree,
               av1_pareto8_full[p->context_tree[PIVOT_NODE] - 1], coef_value,
@@ -1039,15 +1137,30 @@ static void pack_mb_tokens(aom_writer *w,
       if (bit_string_length > 0) {
 #if CONFIG_NEW_MULTISYMBOL
         skip_bits &= ~3;
-        write_coeff_extra(extra_bits->cdf, bit_string >> 1,
-                          bit_string_length - skip_bits, w);
+#if CONFIG_COLLECT_RD_MODEL
+        rdc->rd_coeff_cost[plane] +=
+#endif
+          write_coeff_extra(extra_bits->cdf, bit_string >> 1,
+                            bit_string_length - skip_bits, w);
 #else
-        write_coeff_extra(extra_bits->prob, bit_string >> 1, bit_string_length,
-                          skip_bits, w, token_stats);
+#if CONFIG_COLLECT_RD_MODEL
+        rdc->rd_coeff_cost[plane] +=
+#endif
+          write_coeff_extra(extra_bits->prob, bit_string >> 1,
+                            bit_string_length, skip_bits, w, token_stats);
 #endif
       }
+      // Sign bit
+#if CONFIG_COLLECT_RD_MODEL
+      rdc->rd_coeff_cost[plane] += av1_cost_bit(128, bit_string & 1);
+#endif
       aom_write_bit_record(w, bit_string & 1, token_stats);
     }
+#if CONFIG_COLLECT_RD_MODEL
+    if (token == EOB_TOKEN) {
+      rdc = rdc->next[plane];
+    }
+#endif
     ++p;
 
 #if CONFIG_VAR_TX
