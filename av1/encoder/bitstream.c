@@ -777,8 +777,76 @@ static void update_supertx_probs(AV1_COMMON *cm, int probwt, aom_writer *w) {
 }
 #endif  // CONFIG_SUPERTX
 
+#if CONFIG_COLLECT_RD_MODEL
+static int aom_cost_symbol(int symb, const aom_cdf_prob *cdf, int n){
+  int prob_den = cdf[n - 1];
+  int prob_num = cdf[symb];
+  if (symb > 0) prob_num -= cdf[symb - 1];
+  return av1_cost_zero(get_prob(prob_num, prob_den));
+}
+
+#if CONFIG_EC_MULTISYMBOL
+static int aom_cost_tree_as_cdf(const aom_tree_index *tree,
+                                 const aom_prob *probs, int bits,
+                                 int len, aom_tree_index i) {
+  int cost = 0;
+  aom_tree_index root;
+  root = i;
+  do {
+    aom_cdf_prob cdf[16];
+    aom_tree_index index[16];
+    int path[16];
+    int dist[16];
+    int nsymbs;
+    int symb;
+    int j;
+    /* Compute the CDF of the binary tree using the given probabilities. */
+    nsymbs = tree_to_cdf(tree, probs, root, cdf, index, path, dist);
+    /* Find the symbol to code. */
+    symb = -1;
+    for (j = 0; j < nsymbs; j++) {
+      /* If this symbol codes a leaf node,  */
+      if (index[j] <= 0) {
+        if (len == dist[j] && path[j] == bits) {
+          symb = j;
+          break;
+        }
+      } else {
+        if (len > dist[j] && path[j] == bits >> (len - dist[j])) {
+          symb = j;
+          break;
+        }
+      }
+    }
+    OD_ASSERT(symb != -1);
+    cost += aom_cost_symbol(symb, cdf, nsymbs);
+    bits &= (1 << (len - dist[symb])) - 1;
+    len -= dist[symb];
+  } while (len);
+  return cost;
+}
+#else
+static int aom_cost_tree_as_bits(const aom_tree_index *tr,
+                                 const aom_prob *probs, int bits,
+                                 int len, aom_tree_index i) {
+  int cost = 0;
+  do {
+    const int bit = (bits >> --len) & 1;
+    cost += av1_cost_bit(probs[i >> 1], bit);
+    i = tr[i + bit];
+  } while (len);
+  return cost;
+}
+#endif
+#endif
+
 #if CONFIG_NEW_TOKENSET
-static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
+static void pack_mb_tokens(aom_writer *w,
+#if CONFIG_COLLECT_RD_MODEL
+                           COLLECT_RD *rdc,
+                           int plane,
+#endif
+                           const TOKENEXTRA **tp,
                            const TOKENEXTRA *const stop,
                            aom_bit_depth_t bit_depth, const TX_SIZE tx_size,
                            TOKEN_STATS *token_stats) {
@@ -803,6 +871,12 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
     const av1_extra_bit *const extra_bits = &extra_bits_table[token];
 
     if (token == BLOCK_Z_TOKEN) {
+#if CONFIG_COLLECT_RD_MODEL
+      rdc->rd_blockz_cost[plane] =
+        aom_cost_symbol(0, *p->head_cdf, 6);
+      // rdc->rd_coeff_cost[plane] = 0; redundant: cleared earlier
+      rdc = rdc->next[plane];
+#endif
       aom_write_symbol(w, 0, *p->head_cdf, 6);
       p++;
       continue;
@@ -811,6 +885,10 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
 
     aom_write_symbol(w, comb_symb, *p->head_cdf, 6);
     if (token > ONE_TOKEN) {
+#if CONFIG_COLLECT_RD_MODEL
+      rdc->rd_coeff_cost[plane] +=
+        aom_cost_symbol(token - TWO_TOKEN, *p->tail_cdf, CATEGORY6_TOKEN + 1 - 2);
+ #endif
       aom_write_symbol(w, token - TWO_TOKEN, *p->tail_cdf,
                        CATEGORY6_TOKEN + 1 - 2);
     }
@@ -837,13 +915,25 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
             --skip_bits;
             assert(!bb);
           } else {
+#if CONFIG_COLLECT_RD_MODEL
+            rdc->rd_coeff_cost[plane] +=
+              av1_cost_bit(pb[index], bb);
+#endif
             aom_write_record(w, bb, pb[index], token_stats);
           }
         }
       }
 
+#if CONFIG_COLLECT_RD_MODEL
+      rdc->rd_coeff_cost[plane] += av1_cost_bit(128, bit_string & 1);
+#endif
       aom_write_bit_record(w, bit_string & 1, token_stats);
     }
+#if CONFIG_COLLECT_RD_MODEL
+    if (token == EOB_TOKEN){
+      rdc = rdc->next[plane];
+    }
+#endif
     ++p;
 
 #if CONFIG_VAR_TX || CONFIG_PALETTE_THROUGHPUT
@@ -853,9 +943,18 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
   }
 
   *tp = p;
-}
+#if CONFIG_COLLECT_RD_MODEL
+  if(rdc!=NULL)
+    fprintf(stderr,"packing ended early?\n");
+#endif
+  }
 #else
-static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
+static void pack_mb_tokens(aom_writer *w,
+#if CONFIG_COLLECT_RD_MODEL
+                           COLLECT_RD *rdc,
+                           int plane,
+#endif
+                           const TOKENEXTRA **tp,
                            const TOKENEXTRA *const stop,
                            aom_bit_depth_t bit_depth, const TX_SIZE tx_size,
                            TOKEN_STATS *token_stats) {
@@ -886,11 +985,25 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
 
 #if CONFIG_EC_MULTISYMBOL
     /* skip one or two nodes */
-    if (!p->skip_eob_node)
+    if (!p->skip_eob_node) {
+#if CONFIG_COLLECT_RD_MODEL
+      rdc->rd_blockz_cost[plane] =
+        av1_cost_bit(p->context_tree[0], token != EOB_TOKEN);
+#endif
       aom_write_record(w, token != EOB_TOKEN, p->context_tree[0], token_stats);
+ }
     if (token != EOB_TOKEN) {
+#if CONFIG_COLLECT_RD_MODEL
+      rdc->rd_coeff_cost[plane] +=
+        av1_cost_bit(p->context_tree[1], token != ZERO_TOKEN);
+#endif
       aom_write_record(w, token != ZERO_TOKEN, p->context_tree[1], token_stats);
       if (token != ZERO_TOKEN) {
+#if CONFIG_COLLECT_RD_MODEL
+        rdc->rd_coeff_cost[plane] +=
+          aom_cost_symbol(token - ONE_TOKEN, *p->token_cdf,
+                          CATEGORY6_TOKEN - ONE_TOKEN + 1);
+#endif
         aom_write_symbol(w, token - ONE_TOKEN, *p->token_cdf,
                          CATEGORY6_TOKEN - ONE_TOKEN + 1);
       }
@@ -899,22 +1012,46 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
     /* skip one or two nodes */
     if (p->skip_eob_node)
       coef_length -= p->skip_eob_node;
-    else
+    else {
+#if CONFIG_COLLECT_RD_MODEL
+      rdc->rd_blockz_cost[plane] =
+        av1_cost_bit(p->context_tree[0], token != EOB_TOKEN);
+#endif
       aom_write_record(w, token != EOB_TOKEN, p->context_tree[0], token_stats);
-
+    }
     if (token != EOB_TOKEN) {
+#if CONFIG_COLLECT_RD_MODEL
+      rdc->rd_coeff_cost[plane] +=
+        av1_cost_bit(p->context_tree[1], token != ZERO_TOKEN);
+#endif
       aom_write_record(w, token != ZERO_TOKEN, p->context_tree[1], token_stats);
 
       if (token != ZERO_TOKEN) {
+#if CONFIG_COLLECT_RD_MODEL
+        rdc->rd_coeff_cost[plane] +=
+          av1_cost_bit(p->context_tree[2], token != ONE_TOKEN);
+#endif
         aom_write_record(w, token != ONE_TOKEN, p->context_tree[2],
                          token_stats);
 
         if (token != ONE_TOKEN) {
           const int unconstrained_len = UNCONSTRAINED_NODES - p->skip_eob_node;
+#if CONFIG_COLLECT_RD_MODEL
+          rdc->rd_coeff_cost[plane] +=
+#if CONFIG_EC_MULTISYMBOL
+            aom_cost_tree_as_cdf(av1_coef_con_tree,
+                                 av1_pareto8_full[p->context_tree[PIVOT_NODE] - 1], coef_value,
+                                 coef_length - unconstrained_len, 0);
+#else
+          aom_cost_tree_as_bits(av1_coef_con_tree,
+                                av1_pareto8_full[p->context_tree[PIVOT_NODE] - 1], coef_value,
+                                coef_length - unconstrained_len, 0);
+#endif
+#endif
           aom_write_tree_record(
-              w, av1_coef_con_tree,
-              av1_pareto8_full[p->context_tree[PIVOT_NODE] - 1], coef_value,
-              coef_length - unconstrained_len, 0, token_stats);
+                                w, av1_coef_con_tree,
+                                av1_pareto8_full[p->context_tree[PIVOT_NODE] - 1], coef_value,
+                                coef_length - unconstrained_len, 0, token_stats);
         }
       }
     }
@@ -942,13 +1079,25 @@ static void pack_mb_tokens(aom_writer *w, const TOKENEXTRA **tp,
             --skip_bits;
             assert(!bb);
           } else {
+#if CONFIG_COLLECT_RD_MODEL
+            rdc->rd_coeff_cost[plane] += av1_cost_bit(pb[index], bb);
+#endif
             aom_write_record(w, bb, pb[index], token_stats);
           }
         }
       }
 
+      // Sign bit
+#if CONFIG_COLLECT_RD_MODEL
+      rdc->rd_coeff_cost[plane] += av1_cost_bit(128, bit_string & 1);
+#endif
       aom_write_bit_record(w, bit_string & 1, token_stats);
     }
+#if CONFIG_COLLECT_RD_MODEL
+    if (token == EOB_TOKEN) {
+      rdc = rdc->next[plane];
+    }
+#endif
     ++p;
 
 #if CONFIG_VAR_TX || CONFIG_PALETTE_THROUGHPUT
@@ -2036,6 +2185,55 @@ static void write_mbmi_b(AV1_COMP *cpi, const TileInfo *const tile,
   }
 }
 
+#if CONFIG_COLLECT_RD_MODEL
+typedef struct {
+  AV1_COMP *cpi;
+  MACROBLOCKD *xd;
+  int rd_stride;
+  int rd_row;
+  int rd_col;
+  int tell_cost;
+} write_rd_stats_args;
+
+static void write_rd_stats_b(int plane, int block, int blk_row, int blk_col,
+                             BLOCK_SIZE plane_bsize, TX_SIZE tx_size,
+                             void *arg) {
+  write_rd_stats_args *args = (write_rd_stats_args *)arg;
+  AV1_COMP *cpi = args->cpi;
+  const AV1_COMMON *cm = &cpi->common;
+  COLLECT_RD *rdc = cm->rdp + (args->rd_row + blk_row) * args->rd_stride +
+    args->rd_col + blk_col;
+  MACROBLOCKD *xd = args->xd;
+  const int tx_width = tx_size_wide[tx_size];
+  const int tx_height = tx_size_high[tx_size];
+  int n = tx_width*tx_height;
+  struct macroblockd_plane *pd = &xd->plane[plane];
+  MB_MODE_INFO *mbmi = &xd->mi[0]->mbmi;
+  (void)plane_bsize;
+  (void)block;
+  printf("%u %u %u %u  %u %u %u %u %u  %lu %lu %u  %u %u %u\n",
+         is_inter_block(mbmi),
+         plane,
+         av1_get_qindex(&cm->seg, mbmi->segment_id, cm->base_qindex),
+         pd->dequant[1], /* actual AC quantizer */
+
+         n, /* total pixels/coeffs in tx block */
+         (unsigned)mbmi->sb_type,
+         (unsigned)mbmi->mode,
+         (unsigned)mbmi->tx_type, /* transform type */
+         rdc->rd_tx_coded[plane], /* coded pixels (eob) */
+
+         rdc->rd_px_var[plane],
+         rdc->rd_px_dist[plane],
+         rdc->rd_tx_satd[plane],
+
+         rdc->rd_blockz_cost[plane],
+         rdc->rd_coeff_cost[plane],
+         args->tell_cost);
+  args->tell_cost = 0;
+}
+#endif
+
 static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
                            aom_writer *w, const TOKENEXTRA **tok,
                            const TOKENEXTRA *const tok_end, int mi_row,
@@ -2299,7 +2497,33 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
       }
 #else
       init_token_stats(&token_stats);
-      pack_mb_tokens(w, tok, tok_end, cm->bit_depth, tx, &token_stats);
+#if CONFIG_COLLECT_RD_MODEL
+      int tell_frac;
+      tell_frac = od_ec_enc_tell_frac(&w->ec);
+#endif // CONFIG_COLLECT_RD_MODEL
+      pack_mb_tokens(w,
+#if CONFIG_COLLECT_RD_MODEL
+                     cm->rdp + mi_row*cm->mi_stride*4 + mi_col*2, plane,
+#endif
+                     tok, tok_end, cm->bit_depth, tx, &token_stats);
+
+#if CONFIG_COLLECT_RD_MODEL
+      tell_frac = m->mbmi.skip ? 0 : od_ec_enc_tell_frac(&w->ec) - tell_frac;
+      tell_frac <<= AV1_PROB_COST_SHIFT - OD_BITRES; /* (bits in Q9) */
+
+      static write_rd_stats_args args;
+      args.tell_cost = tell_frac;
+      args.cpi = cpi;
+      args.xd = xd;
+      args.rd_stride = cm->mi_stride*2;
+      args.rd_row = mi_row*2;
+      args.rd_col = mi_col*2;
+
+      if(!mbmi->skip){
+        av1_foreach_transformed_block_in_plane(xd, mbmi->sb_type, plane,
+                                               write_rd_stats_b, &args);
+      }
+#endif // CONFIG_COLLECT_RD_MODEL
 #endif  // CONFIG_PALETTE && CONFIG_PALETTE_THROUGHPUT
 #if CONFIG_RD_DEBUG
       if (is_inter_block(mbmi) && mbmi->sb_type >= BLOCK_8X8 &&

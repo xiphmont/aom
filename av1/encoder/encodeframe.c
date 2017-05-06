@@ -5580,6 +5580,86 @@ static void tx_partition_set_contexts(const AV1_COMMON *const cm,
 }
 #endif
 
+#if CONFIG_COLLECT_RD_MODEL
+typedef struct collect_rd_stats_args {
+  const AV1_COMP *cpi;
+  MACROBLOCK *x;
+  int rd_stride;
+  int rd_row;
+  int rd_col;
+  COLLECT_RD *prev;
+} collect_rd_stats_args;
+
+static void collect_rd_stats_b(int plane, int block, int blk_row, int blk_col,
+                               BLOCK_SIZE plane_bsize, TX_SIZE tx_size,
+                               void *arg) {
+  collect_rd_stats_args *args = (collect_rd_stats_args *)arg;
+  const AV1_COMP *cpi = args->cpi;
+  const AV1_COMMON *cm = &cpi->common;
+  MACROBLOCK *x = args->x;
+  const MACROBLOCKD *xd = &x->e_mbd;
+  COLLECT_RD *rdc = cm->rdp + (args->rd_row + blk_row) * args->rd_stride +
+    args->rd_col + blk_col;
+  struct macroblock_plane *p = &x->plane[plane];
+  const struct macroblockd_plane *const pd = &xd->plane[plane];
+  const int tx_width = tx_size_wide[tx_size];
+  const int tx_height = tx_size_high[tx_size];
+  const tran_low_t *coeff = BLOCK_OFFSET(p->coeff, block);
+  const int src_stride = p->src.stride;
+  const int rec_stride = pd->dst.stride;
+  const int diff_stride = block_size_wide[plane_bsize];
+  const uint8_t *src =
+    &p->src.buf[(blk_row * src_stride + blk_col) << tx_size_wide_log2[0]];
+  const uint8_t *rec =
+    &pd->dst.buf[(blk_row * rec_stride + blk_col) << tx_size_wide_log2[0]];
+  const int16_t *diff =
+    &p->src_diff[(blk_row * diff_stride + blk_col) << tx_size_wide_log2[0]];
+  int i;
+  int j;
+  int n = tx_width*tx_height;
+  int32_t sum;
+  uint64_t ssq;
+
+  rdc->next[plane] = NULL;
+  if (args->prev) args->prev->next[plane] = rdc;
+
+  rdc->rd_blockz_cost[plane] = 0;
+  rdc->rd_coeff_cost[plane] = 0;
+  rdc->rd_tx_coded[plane] = p->eobs[block];
+
+  /* Compute pixel distortion. */
+  ssq = 0;
+  for (i = 0; i < tx_height; i++) {
+    for (j = 0; j < tx_width; j++) {
+      int d = src[i*src_stride + j] - rec[i*rec_stride + j];
+      ssq += d*d;
+    }
+  }
+  rdc->rd_px_dist[plane] = ssq;
+
+  /* Compute pixel variance from the difference buffer. */
+  sum = 0;
+  ssq = 0;
+  for (i = 0; i < tx_height; i++) {
+    for (j = 0; j < tx_width; j++) {
+      int d = diff[i*diff_stride + j];
+      sum += d;
+      ssq += d*d;
+    }
+  }
+  rdc->rd_px_var[plane] = ssq*n - sum*sum;
+
+  /* Compute SATD (without DC, stored separately) */
+  sum = 0;
+  for (i = 1; i < n; i++) {
+    sum += abs(coeff[i]);
+  }
+  rdc->rd_tx_satd[plane] = sum;
+
+  args->prev = rdc;
+}
+#endif
+
 static void encode_superblock(const AV1_COMP *const cpi, ThreadData *td,
                               TOKENEXTRA **t, RUN_TYPE dry_run, int mi_row,
                               int mi_col, BLOCK_SIZE bsize,
@@ -5740,6 +5820,24 @@ static void encode_superblock(const AV1_COMP *const cpi, ThreadData *td,
     av1_tokenize_sb(cpi, td, t, dry_run, block_size, rate, mi_row, mi_col);
 #endif
   }
+
+  /* RD Modeling data collection */
+#if CONFIG_COLLECT_RD_MODEL
+  if (dry_run == OUTPUT_ENABLED) {
+    int plane;
+    collect_rd_stats_args args;
+    args.cpi = cpi;
+    args.x = x;
+    args.rd_stride = cm->mi_stride*2;
+    args.rd_row = mi_row*2;
+    args.rd_col = mi_col*2;
+    for (plane = 0; plane < MAX_MB_PLANE; ++plane){
+      args.prev = NULL;
+      av1_foreach_transformed_block_in_plane(xd, bsize, plane,
+                                             collect_rd_stats_b, &args);
+    }
+  }
+#endif
 
   if (!dry_run) {
 #if CONFIG_VAR_TX

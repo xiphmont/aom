@@ -360,6 +360,11 @@ static int av1_enc_alloc_mi(AV1_COMMON *cm, int mi_size) {
       (MODE_INFO **)aom_calloc(mi_size, sizeof(MODE_INFO *));
   if (!cm->prev_mi_grid_base) return 1;
 
+#if CONFIG_COLLECT_RD_MODEL
+  cm->rdp = (COLLECT_RD *)aom_calloc(mi_size*4, sizeof(COLLECT_RD));
+  if (!cm->rdp) return 1;
+#endif
+
   return 0;
 }
 
@@ -372,6 +377,10 @@ static void av1_enc_free_mi(AV1_COMMON *cm) {
   cm->mi_grid_base = NULL;
   aom_free(cm->prev_mi_grid_base);
   cm->prev_mi_grid_base = NULL;
+#if CONFIG_COLLECT_RD_MODEL
+  aom_free(cm->rdp);
+  cm->rdp = NULL;
+#endif
 }
 
 static void av1_swap_mi_and_prev_mi(AV1_COMMON *cm) {
