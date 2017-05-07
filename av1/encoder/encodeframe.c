@@ -5833,7 +5833,7 @@ static void encode_superblock(const AV1_COMP *const cpi, ThreadData *td,
     args.rd_col = mi_col*2;
     for (plane = 0; plane < MAX_MB_PLANE; ++plane){
       args.prev = NULL;
-      av1_foreach_transformed_block_in_plane(xd, bsize, plane,
+      av1_foreach_transformed_block_in_plane(xd, block_size, plane,
                                              collect_rd_stats_b, &args);
     }
   }

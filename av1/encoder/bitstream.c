@@ -2499,6 +2499,7 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
       init_token_stats(&token_stats);
 #if CONFIG_COLLECT_RD_MODEL
       int tell_frac;
+      const BLOCK_SIZE actual_bsize= AOMMAX(xd->mi[0]->mbmi.sb_type, BLOCK_8X8);
       tell_frac = od_ec_enc_tell_frac(&w->ec);
 #endif // CONFIG_COLLECT_RD_MODEL
       pack_mb_tokens(w,
@@ -2520,7 +2521,7 @@ static void write_tokens_b(AV1_COMP *cpi, const TileInfo *const tile,
       args.rd_col = mi_col*2;
 
       if(!mbmi->skip){
-        av1_foreach_transformed_block_in_plane(xd, mbmi->sb_type, plane,
+        av1_foreach_transformed_block_in_plane(xd, actual_bsize, plane,
                                                write_rd_stats_b, &args);
       }
 #endif // CONFIG_COLLECT_RD_MODEL
