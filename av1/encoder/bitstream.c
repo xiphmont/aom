@@ -937,13 +937,17 @@ static void pack_mb_tokens(aom_writer *w,
   int count = 0;
   const int seg_eob = tx_size_2d[tx_size];
 #endif
+#if CONFIG_COLLECT_RD_MODEL
+  int cost = 0;
+#endif
   while (p < stop && p->token != EOSB_TOKEN) {
     const int token = p->token;
     if (token == BLOCK_Z_TOKEN) {
 #if CONFIG_COLLECT_RD_MODEL
       rdc->rd_blockz_cost[plane] =
         aom_cost_symbol(0, *p->head_cdf, HEAD_TOKENS + 1);
-      // rdc->rd_coeff_cost[plane] = 0; redundant: cleared earlier
+      rdc->rd_coeff_cost[plane] = cost;
+      cost = 0;
       rdc = rdc->next[plane];
 #endif
       aom_write_symbol(w, 0, *p->head_cdf, HEAD_TOKENS + 1);
@@ -955,21 +959,20 @@ static void pack_mb_tokens(aom_writer *w,
     if (p->eob_val == LAST_EOB) {
       // Just code a flag indicating whether the value is >1 or 1.
 #if CONFIG_COLLECT_RD_MODEL
-      rdc->rd_coeff_cost[plane] += av1_cost_bit(128, token != ONE_TOKEN);
+      cost += av1_cost_bit(128, token != ONE_TOKEN);
 #endif
       aom_write_bit(w, token != ONE_TOKEN);
     } else {
       int comb_symb = 2 * AOMMIN(token, TWO_TOKEN) - p->eob_val + p->first_val;
 #if CONFIG_COLLECT_RD_MODEL
-      rdc->rd_coeff_cost[plane] +=
+      cost +=
         aom_cost_symbol(comb_symb, *p->head_cdf, HEAD_TOKENS + p->first_val);
 #endif
       aom_write_symbol(w, comb_symb, *p->head_cdf, HEAD_TOKENS + p->first_val);
     }
     if (token > ONE_TOKEN) {
 #if CONFIG_COLLECT_RD_MODEL
-      rdc->rd_coeff_cost[plane] +=
-        aom_cost_symbol(token - TWO_TOKEN, *p->tail_cdf, TAIL_TOKENS);
+      cost += aom_cost_symbol(token - TWO_TOKEN, *p->tail_cdf, TAIL_TOKENS);
 #endif
       aom_write_symbol(w, token - TWO_TOKEN, *p->tail_cdf, TAIL_TOKENS);
     }
@@ -989,13 +992,13 @@ static void pack_mb_tokens(aom_writer *w,
       if (bit_string_length > 0) {
 #if CONFIG_NEW_MULTISYMBOL
 #if CONFIG_COLLECT_RD_MODEL
-        rdc->rd_coeff_cost[plane] +=
+        cost +=
 #endif
           write_coeff_extra(extra_bits->cdf, bit_string >> 1,
                             bit_string_length - skip_bits, w);
 #else // CONFIG_NEW_MULTISYMBOL
 #if CONFIG_COLLECT_RD_MODEL
-        rdc->rd_coeff_cost[plane] +=
+        cost +=
 #endif
           write_coeff_extra(extra_bits->prob, bit_string >> 1, bit_string_length,
                             skip_bits, w, token_stats);
@@ -1003,12 +1006,14 @@ static void pack_mb_tokens(aom_writer *w,
       }
       // Sign bit
 #if CONFIG_COLLECT_RD_MODEL
-      rdc->rd_coeff_cost[plane] += av1_cost_bit(128, bit_string & 1);
+      cost += av1_cost_bit(128, bit_string & 1);
 #endif
       aom_write_bit_record(w, bit_string & 1, token_stats);
     }
 #if CONFIG_COLLECT_RD_MODEL
     if (p->eob_val){
+      rdc->rd_coeff_cost[plane] = cost;
+      cost = 0;
       rdc = rdc->next[plane];
     }
 #endif
@@ -1033,6 +1038,9 @@ static void pack_mb_tokens(aom_writer *w,
                            aom_bit_depth_t bit_depth, const TX_SIZE tx_size,
                            TOKEN_STATS *token_stats) {
   const TOKENEXTRA *p = *tp;
+#if CONFIG_COLLECT_RD_MODEL
+  int cost = 0;
+#endif
 #if CONFIG_VAR_TX
   int count = 0;
   const int seg_eob = tx_size_2d[tx_size];
@@ -1059,15 +1067,13 @@ static void pack_mb_tokens(aom_writer *w,
 
     if (token != EOB_TOKEN) {
 #if CONFIG_COLLECT_RD_MODEL
-      rdc->rd_coeff_cost[plane] +=
-        av1_cost_bit(p->context_tree[1], token != ZERO_TOKEN);
+      cost += av1_cost_bit(p->context_tree[1], token != ZERO_TOKEN);
 #endif
       aom_write_record(w, token != ZERO_TOKEN, p->context_tree[1], token_stats);
       if (token != ZERO_TOKEN) {
 #if CONFIG_COLLECT_RD_MODEL
-        rdc->rd_coeff_cost[plane] +=
-          aom_cost_symbol(token - ONE_TOKEN, *p->token_cdf,
-                          CATEGORY6_TOKEN - ONE_TOKEN + 1);
+        cost += aom_cost_symbol(token - ONE_TOKEN, *p->token_cdf,
+                                CATEGORY6_TOKEN - ONE_TOKEN + 1);
 #endif
         aom_write_symbol(w, token - ONE_TOKEN, *p->token_cdf,
                          CATEGORY6_TOKEN - ONE_TOKEN + 1);
@@ -1087,15 +1093,13 @@ static void pack_mb_tokens(aom_writer *w,
 
     if (token != EOB_TOKEN) {
 #if CONFIG_COLLECT_RD_MODEL
-      rdc->rd_coeff_cost[plane] +=
-        av1_cost_bit(p->context_tree[1], token != ZERO_TOKEN);
+      cost += av1_cost_bit(p->context_tree[1], token != ZERO_TOKEN);
 #endif
       aom_write_record(w, token != ZERO_TOKEN, p->context_tree[1], token_stats);
 
       if (token != ZERO_TOKEN) {
 #if CONFIG_COLLECT_RD_MODEL
-        rdc->rd_coeff_cost[plane] +=
-          av1_cost_bit(p->context_tree[2], token != ONE_TOKEN);
+        cost += av1_cost_bit(p->context_tree[2], token != ONE_TOKEN);
 #endif
         aom_write_record(w, token != ONE_TOKEN, p->context_tree[2],
                          token_stats);
@@ -1103,7 +1107,7 @@ static void pack_mb_tokens(aom_writer *w,
         if (token != ONE_TOKEN) {
           const int unconstrained_len = UNCONSTRAINED_NODES - p->skip_eob_node;
 #if CONFIG_COLLECT_RD_MODEL
-          rdc->rd_coeff_cost[plane] +=
+          cost +=
 #if CONFIG_EC_MULTISYMBOL
             aom_cost_tree_as_cdf(av1_coef_con_tree,
               av1_pareto8_full[p->context_tree[PIVOT_NODE] - 1], coef_value,
@@ -1138,13 +1142,13 @@ static void pack_mb_tokens(aom_writer *w,
 #if CONFIG_NEW_MULTISYMBOL
         skip_bits &= ~3;
 #if CONFIG_COLLECT_RD_MODEL
-        rdc->rd_coeff_cost[plane] +=
+        cost +=
 #endif
           write_coeff_extra(extra_bits->cdf, bit_string >> 1,
                             bit_string_length - skip_bits, w);
 #else
 #if CONFIG_COLLECT_RD_MODEL
-        rdc->rd_coeff_cost[plane] +=
+        cost +=
 #endif
           write_coeff_extra(extra_bits->prob, bit_string >> 1,
                             bit_string_length, skip_bits, w, token_stats);
@@ -1152,12 +1156,14 @@ static void pack_mb_tokens(aom_writer *w,
       }
       // Sign bit
 #if CONFIG_COLLECT_RD_MODEL
-      rdc->rd_coeff_cost[plane] += av1_cost_bit(128, bit_string & 1);
+      cost += av1_cost_bit(128, bit_string & 1);
 #endif
       aom_write_bit_record(w, bit_string & 1, token_stats);
     }
 #if CONFIG_COLLECT_RD_MODEL
     if (token == EOB_TOKEN) {
+      rdc->rd_coeff_cost[plane] = cost;
+      cost = 0;
       rdc = rdc->next[plane];
     }
 #endif
