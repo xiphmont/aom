@@ -936,7 +936,11 @@ int av1_is_intra_filter_switchable(int angle);
 #endif  // CONFIG_INTRA_INTERP
 #endif  // CONFIG_EXT_INTRA
 
+#if CONFIG_DCT_ONLY
+#define FIXED_TX_TYPE 1
+#else
 #define FIXED_TX_TYPE 0
+#endif
 
 // Converts block_index for given transform size to index of the block in raster
 // order.
@@ -964,7 +968,7 @@ static INLINE TX_TYPE get_default_tx_type(PLANE_TYPE plane_type,
                                           TX_SIZE tx_size) {
   const MB_MODE_INFO *const mbmi = &xd->mi[0]->mbmi;
 
-  if (is_inter_block(mbmi) || plane_type != PLANE_TYPE_Y ||
+  if (CONFIG_DCT_ONLY || is_inter_block(mbmi) || plane_type != PLANE_TYPE_Y ||
       xd->lossless[mbmi->segment_id] || tx_size >= TX_32X32)
     return DCT_DCT;
 
