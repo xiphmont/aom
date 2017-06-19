@@ -14,6 +14,9 @@
 
 #include "./aom_dsp_rtcd.h"
 #include "aom_dsp/inv_txfm.h"
+#if CONFIG_DAALA_DCT4 || CONFIG_DAALA_DCT8
+#include "av1/common/daala_tx.h"
+#endif
 
 void aom_iwht4x4_16_add_c(const tran_low_t *input, uint8_t *dest, int stride) {
   /* 4-point reversible, orthonormal inverse Walsh-Hadamard in 3.5 adds,
@@ -93,6 +96,18 @@ void aom_iwht4x4_1_add_c(const tran_low_t *in, uint8_t *dest, int dest_stride) {
   }
 }
 
+#if CONFIG_DAALA_DCT4
+void aom_idct4_c(const tran_low_t *input, tran_low_t *output) {
+  int i;
+  od_coeff x[4];
+  od_coeff y[4];
+  for (i = 0; i < 4; i++) y[i] = input[i];
+  od_bin_idct4(x, 1, y);
+  for (i = 0; i < 4; i++) output[i] = (tran_low_t)x[i];
+}
+
+#else
+
 void aom_idct4_c(const tran_low_t *input, tran_low_t *output) {
   tran_low_t step[4];
   tran_high_t temp1, temp2;
@@ -112,6 +127,7 @@ void aom_idct4_c(const tran_low_t *input, tran_low_t *output) {
   output[2] = WRAPLOW(step[1] - step[2]);
   output[3] = WRAPLOW(step[0] - step[3]);
 }
+#endif
 
 void aom_idct4x4_16_add_c(const tran_low_t *input, uint8_t *dest, int stride) {
   tran_low_t out[4 * 4];
@@ -155,6 +171,18 @@ void aom_idct4x4_1_add_c(const tran_low_t *input, uint8_t *dest,
     dest += dest_stride;
   }
 }
+
+#if CONFIG_DAALA_DCT8
+void aom_idct8_c(const tran_low_t *input, tran_low_t *output) {
+  int i;
+  od_coeff x[8];
+  od_coeff y[8];
+  for (i = 0; i < 8; i++) y[i] = (od_coeff)input[i];
+  od_bin_idct8(x, 1, y);
+  for (i = 0; i < 8; i++) output[i] = (tran_low_t)x[i];
+}
+
+#else
 
 void aom_idct8_c(const tran_low_t *input, tran_low_t *output) {
   tran_low_t step1[8], step2[8];
@@ -209,6 +237,7 @@ void aom_idct8_c(const tran_low_t *input, tran_low_t *output) {
   output[6] = WRAPLOW(step1[1] - step1[6]);
   output[7] = WRAPLOW(step1[0] - step1[7]);
 }
+#endif
 
 void aom_idct8x8_64_add_c(const tran_low_t *input, uint8_t *dest, int stride) {
   tran_low_t out[8 * 8];
@@ -283,6 +312,18 @@ void aom_iadst4_c(const tran_low_t *input, tran_low_t *output) {
   output[2] = WRAPLOW(dct_const_round_shift(s2));
   output[3] = WRAPLOW(dct_const_round_shift(s0 + s1 - s3));
 }
+
+#if CONFIG_DAALA_DCT8
+void aom_iadst8_c(const tran_low_t *input, tran_low_t *output) {
+  int i;
+  od_coeff x[8];
+  od_coeff y[8];
+  for (i = 0; i < 8; i++) y[i] = (od_coeff)input[i];
+  od_bin_idst8(x, 1, y);
+  for (i = 0; i < 8; i++) output[i] = (tran_low_t)x[i];
+}
+
+#else
 
 void aom_iadst8_c(const tran_low_t *input, tran_low_t *output) {
   int s0, s1, s2, s3, s4, s5, s6, s7;
@@ -360,6 +401,8 @@ void aom_iadst8_c(const tran_low_t *input, tran_low_t *output) {
   output[6] = WRAPLOW(x5);
   output[7] = WRAPLOW(-x1);
 }
+
+#endif
 
 void aom_idct8x8_12_add_c(const tran_low_t *input, uint8_t *dest, int stride) {
   tran_low_t out[8 * 8] = { 0 };
