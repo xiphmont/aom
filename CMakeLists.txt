@@ -199,6 +199,8 @@ setup_aom_scale_targets()
 setup_av1_targets()
 
 # Make all library targets depend on aom_rtcd to make sure it builds first.
+    "${AOM_ROOT}/av1/common/daala_tx.c"
+    "${AOM_ROOT}/av1/common/daala_tx.h"
 foreach (aom_lib ${AOM_LIB_TARGETS})
   if (NOT "${aom_lib}" STREQUAL "aom_rtcd")
     add_dependencies(${aom_lib} aom_rtcd)
