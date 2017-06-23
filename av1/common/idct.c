@@ -198,6 +198,10 @@ static void highbd_inv_idtx_add_c(const tran_low_t *input, uint8_t *dest8,
 
 void av1_iht4x4_16_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                          int tx_type) {
+  if (tx_type == DCT_DCT) {
+    aom_idct4x4_16_add(input, dest, stride);
+    return;
+  }
   static const transform_2d IHT_4[] = {
     { aom_idct4_c, aom_idct4_c },    // DCT_DCT  = 0
     { aom_iadst4_c, aom_idct4_c },   // ADST_DCT = 1
@@ -224,6 +228,10 @@ void av1_iht4x4_16_add_c(const tran_low_t *input, uint8_t *dest, int stride,
   tran_low_t out[4][4];
   tran_low_t *outp = &out[0][0];
   int outstride = 4;
+
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
 
   // inverse transform row vectors
   for (i = 0; i < 4; ++i) {
@@ -259,6 +267,9 @@ void av1_iht4x4_16_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
 void av1_iht4x8_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                          int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_4x8[] = {
     { aom_idct8_c, aom_idct4_c },    // DCT_DCT
     { aom_iadst8_c, aom_idct4_c },   // ADST_DCT
@@ -316,6 +327,9 @@ void av1_iht4x8_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
 void av1_iht8x4_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                          int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_8x4[] = {
     { aom_idct4_c, aom_idct8_c },    // DCT_DCT
     { aom_iadst4_c, aom_idct8_c },   // ADST_DCT
@@ -373,6 +387,9 @@ void av1_iht8x4_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
 void av1_iht4x16_64_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                           int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_4x16[] = {
     { aom_idct16_c, aom_idct4_c },    // DCT_DCT
     { aom_iadst16_c, aom_idct4_c },   // ADST_DCT
@@ -427,6 +444,9 @@ void av1_iht4x16_64_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
 void av1_iht16x4_64_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                           int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_16x4[] = {
     { aom_idct4_c, aom_idct16_c },    // DCT_DCT
     { aom_iadst4_c, aom_idct16_c },   // ADST_DCT
@@ -481,6 +501,9 @@ void av1_iht16x4_64_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
 void av1_iht8x16_128_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                            int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_8x16[] = {
     { aom_idct16_c, aom_idct8_c },    // DCT_DCT
     { aom_iadst16_c, aom_idct8_c },   // ADST_DCT
@@ -538,6 +561,9 @@ void av1_iht8x16_128_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
 void av1_iht16x8_128_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                            int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_16x8[] = {
     { aom_idct8_c, aom_idct16_c },    // DCT_DCT
     { aom_iadst8_c, aom_idct16_c },   // ADST_DCT
@@ -595,6 +621,9 @@ void av1_iht16x8_128_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
 void av1_iht8x32_256_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                            int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_8x32[] = {
     { aom_idct32_c, aom_idct8_c },     // DCT_DCT
     { ihalfright32_c, aom_idct8_c },   // ADST_DCT
@@ -649,6 +678,9 @@ void av1_iht8x32_256_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
 void av1_iht32x8_256_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                            int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_32x8[] = {
     { aom_idct8_c, aom_idct32_c },     // DCT_DCT
     { aom_iadst8_c, aom_idct32_c },    // ADST_DCT
@@ -703,6 +735,9 @@ void av1_iht32x8_256_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
 void av1_iht16x32_512_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                             int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_16x32[] = {
     { aom_idct32_c, aom_idct16_c },     // DCT_DCT
     { ihalfright32_c, aom_idct16_c },   // ADST_DCT
@@ -760,6 +795,9 @@ void av1_iht16x32_512_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
 void av1_iht32x16_512_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                             int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_32x16[] = {
     { aom_idct16_c, aom_idct32_c },     // DCT_DCT
     { aom_iadst16_c, aom_idct32_c },    // ADST_DCT
@@ -817,6 +855,9 @@ void av1_iht32x16_512_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
 void av1_iht8x8_64_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                          int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_8[] = {
     { aom_idct8_c, aom_idct8_c },    // DCT_DCT  = 0
     { aom_iadst8_c, aom_idct8_c },   // ADST_DCT = 1
@@ -878,6 +919,9 @@ void av1_iht8x8_64_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
 void av1_iht16x16_256_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                             int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_16[] = {
     { aom_idct16_c, aom_idct16_c },    // DCT_DCT  = 0
     { aom_iadst16_c, aom_idct16_c },   // ADST_DCT = 1
@@ -940,6 +984,9 @@ void av1_iht16x16_256_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 #if CONFIG_EXT_TX
 void av1_iht32x32_1024_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                              int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_32[] = {
     { aom_idct32_c, aom_idct32_c },      // DCT_DCT
     { ihalfright32_c, aom_idct32_c },    // ADST_DCT
@@ -999,6 +1046,9 @@ void av1_iht32x32_1024_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 #if CONFIG_TX64X64
 void av1_iht64x64_4096_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                              int tx_type) {
+#if CONFIG_DCT_ONLY
+  assert(tx_type == DCT_DCT);
+#endif
   static const transform_2d IHT_64[] = {
     { idct64_col_c, idct64_row_c },      // DCT_DCT
     { ihalfright64_c, idct64_row_c },    // ADST_DCT
@@ -1064,7 +1114,7 @@ void av1_iht64x64_4096_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 void av1_idct4x4_add(const tran_low_t *input, uint8_t *dest, int stride,
                      int eob) {
   if (eob > 1)
-    aom_idct4x4_16_add(input, dest, stride);
+    av1_iht4x4_16_add(input, dest, stride, DCT_DCT);
   else
     aom_idct4x4_1_add(input, dest, stride);
 }
