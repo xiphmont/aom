@@ -287,6 +287,7 @@ EXPERIMENT_LIST="
     xiphrc
     dct_only
     daala_dct4
+    daala_dct8
     cb4x4
     chroma_2x2
     chroma_sub8x8
@@ -551,6 +552,7 @@ post_process_cmdline() {
       disable_feature rect_tx
       disable_feature var_tx
     fi
+    enabled daala_dct8 && disable_feature mmx
     if enabled ext_tile; then
       log_echo "ext_tile not compatible with reference_buffer, so"
       log_echo "disabling reference_buffer"
