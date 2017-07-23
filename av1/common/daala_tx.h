@@ -5,5 +5,7 @@
 
 void od_bin_fdct4(od_coeff y[4], const od_coeff *x, int xstride);
 void od_bin_idct4(od_coeff *x, int xstride, const od_coeff y[4]);
+void od_bin_fdst4(od_coeff y[4], const od_coeff *x, int xstride);
+void od_bin_idst4(od_coeff *x, int xstride, const od_coeff y[4]);
 
 #endif

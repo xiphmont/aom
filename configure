@@ -566,7 +566,6 @@ post_process_cmdline() {
       disable_feature ec_smallmul
     fi
     if enabled daala_dct4; then
-      enable_feature dct_only
       disable_feature mmx
       disable_feature rect_tx
       disable_feature var_tx
