@@ -391,6 +391,26 @@ void av1_iht4x8_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
   assert(tx_type == DCT_DCT);
 #endif
   static const transform_2d IHT_4x8[] = {
+#if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8
+    { daala_idct8, daala_idct4 },  // DCT_DCT  = 0
+    { daala_idst8, daala_idct4 },  // ADST_DCT = 1
+    { daala_idct8, daala_idst4 },  // DCT_ADST = 2
+    { daala_idst8, daala_idst4 },  // ADST_ADST = 3
+#if CONFIG_EXT_TX
+    { daala_idst8, daala_idct4 },  // FLIPADST_DCT
+    { daala_idct8, daala_idst4 },  // DCT_FLIPADST
+    { daala_idst8, daala_idst4 },  // FLIPADST_FLIPADST
+    { daala_idst8, daala_idst4 },  // ADST_FLIPADST
+    { daala_idst8, daala_idst4 },  // FLIPADST_ADST
+    { daala_idtx8, daala_idtx4 },  // IDTX
+    { daala_idct8, daala_idtx4 },  // V_DCT
+    { daala_idtx8, daala_idct4 },  // H_DCT
+    { daala_idst8, daala_idtx4 },  // V_ADST
+    { daala_idtx8, daala_idst4 },  // H_ADST
+    { daala_idst8, daala_idtx4 },  // V_FLIPADST
+    { daala_idtx8, daala_idst4 },  // H_FLIPADST
+#endif
+#else
     { aom_idct8_c, aom_idct4_c },    // DCT_DCT
     { aom_iadst8_c, aom_idct4_c },   // ADST_DCT
     { aom_idct8_c, aom_iadst4_c },   // DCT_ADST
@@ -408,6 +428,7 @@ void av1_iht4x8_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
     { iidtx8_c, aom_iadst4_c },      // H_ADST
     { aom_iadst8_c, iidtx4_c },      // V_FLIPADST
     { iidtx8_c, aom_iadst4_c },      // H_FLIPADST
+#endif
 #endif
   };
 
@@ -427,6 +448,12 @@ void av1_iht4x8_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
   // inverse transform row vectors and transpose
   for (i = 0; i < n2; ++i) {
+#if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8
+    tran_low_t temp_in[4];
+    for (j = 0; j < n; j++) temp_in[j] = input[j] * 2;
+    IHT_4x8[tx_type].rows(temp_in, outtmp);
+    for (j = 0; j < n; ++j) tmp[j][i] = outtmp[j];
+#else
 #if CONFIG_LGT
     if (use_lgt_row)
       ilgt4(input, outtmp, lgtmtx_row[0]);
@@ -435,6 +462,7 @@ void av1_iht4x8_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
       IHT_4x8[tx_type].rows(input, outtmp);
     for (j = 0; j < n; ++j)
       tmp[j][i] = (tran_low_t)dct_const_round_shift(outtmp[j] * Sqrt2);
+#endif
     input += n;
   }
 
@@ -457,7 +485,11 @@ void av1_iht4x8_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
     for (j = 0; j < n; ++j) {
       int d = i * stride + j;
       int s = j * outstride + i;
+#if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8
+      dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 4));
+#else
       dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 5));
+#endif
     }
   }
 }
@@ -472,6 +504,26 @@ void av1_iht8x4_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
   assert(tx_type == DCT_DCT);
 #endif
   static const transform_2d IHT_8x4[] = {
+#if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8
+    { daala_idct4, daala_idct8 },  // DCT_DCT  = 0
+    { daala_idst4, daala_idct8 },  // ADST_DCT = 1
+    { daala_idct4, daala_idst8 },  // DCT_ADST = 2
+    { daala_idst4, daala_idst8 },  // ADST_ADST = 3
+#if CONFIG_EXT_TX
+    { daala_idst4, daala_idct8 },  // FLIPADST_DCT
+    { daala_idct4, daala_idst8 },  // DCT_FLIPADST
+    { daala_idst4, daala_idst8 },  // FLIPADST_FLIPADST
+    { daala_idst4, daala_idst8 },  // ADST_FLIPADST
+    { daala_idst4, daala_idst8 },  // FLIPADST_ADST
+    { daala_idtx4, daala_idtx8 },  // IDTX
+    { daala_idct4, daala_idtx8 },  // V_DCT
+    { daala_idtx4, daala_idct8 },  // H_DCT
+    { daala_idst4, daala_idtx8 },  // V_ADST
+    { daala_idtx4, daala_idst8 },  // H_ADST
+    { daala_idst4, daala_idtx8 },  // V_FLIPADST
+    { daala_idtx4, daala_idst8 },  // H_FLIPADST
+#endif
+#else
     { aom_idct4_c, aom_idct8_c },    // DCT_DCT
     { aom_iadst4_c, aom_idct8_c },   // ADST_DCT
     { aom_idct4_c, aom_iadst8_c },   // DCT_ADST
@@ -489,6 +541,7 @@ void av1_iht8x4_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
     { iidtx4_c, aom_iadst8_c },      // H_ADST
     { aom_iadst4_c, iidtx8_c },      // V_FLIPADST
     { iidtx4_c, aom_iadst8_c },      // H_FLIPADST
+#endif
 #endif
   };
 
@@ -509,6 +562,12 @@ void av1_iht8x4_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
 
   // inverse transform row vectors and transpose
   for (i = 0; i < n; ++i) {
+#if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8
+    tran_low_t temp_in[8];
+    for (j = 0; j < n2; j++) temp_in[j] = input[j] * 2;
+    IHT_8x4[tx_type].rows(temp_in, outtmp);
+    for (j = 0; j < n2; ++j) tmp[j][i] = outtmp[j];
+#else
 #if CONFIG_LGT
     if (use_lgt_row)
       ilgt8(input, outtmp, lgtmtx_row[0]);
@@ -517,6 +576,7 @@ void av1_iht8x4_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
       IHT_8x4[tx_type].rows(input, outtmp);
     for (j = 0; j < n2; ++j)
       tmp[j][i] = (tran_low_t)dct_const_round_shift(outtmp[j] * Sqrt2);
+#endif
     input += n2;
   }
 
@@ -539,7 +599,11 @@ void av1_iht8x4_32_add_c(const tran_low_t *input, uint8_t *dest, int stride,
     for (j = 0; j < n2; ++j) {
       int d = i * stride + j;
       int s = j * outstride + i;
+#if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8
+      dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 4));
+#else
       dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 5));
+#endif
     }
   }
 }
@@ -1751,7 +1815,7 @@ static void inv_txfm_add_4x4(const tran_low_t *input, uint8_t *dest, int stride,
 
 static void inv_txfm_add_4x8(const tran_low_t *input, uint8_t *dest, int stride,
                              const TxfmParam *txfm_param) {
-#if CONFIG_LGT
+#if CONFIG_LGT || (CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8)
   av1_iht4x8_32_add_c(input, dest, stride, txfm_param);
 #else
   av1_iht4x8_32_add(input, dest, stride, txfm_param);
@@ -1760,7 +1824,7 @@ static void inv_txfm_add_4x8(const tran_low_t *input, uint8_t *dest, int stride,
 
 static void inv_txfm_add_8x4(const tran_low_t *input, uint8_t *dest, int stride,
                              const TxfmParam *txfm_param) {
-#if CONFIG_LGT
+#if CONFIG_LGT || (CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8)
   av1_iht8x4_32_add_c(input, dest, stride, txfm_param);
 #else
   av1_iht8x4_32_add(input, dest, stride, txfm_param);
