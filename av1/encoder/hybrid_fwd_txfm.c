@@ -176,7 +176,7 @@ static void fwd_txfm_4x16(const int16_t *src_diff, tran_low_t *coeff,
 
 static void fwd_txfm_32x8(const int16_t *src_diff, tran_low_t *coeff,
                           int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_LGT
+#if CONFIG_LGT || (CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT32)
   av1_fht32x8_c(src_diff, coeff, diff_stride, txfm_param);
 #else
   av1_fht32x8(src_diff, coeff, diff_stride, txfm_param);
@@ -185,7 +185,7 @@ static void fwd_txfm_32x8(const int16_t *src_diff, tran_low_t *coeff,
 
 static void fwd_txfm_8x32(const int16_t *src_diff, tran_low_t *coeff,
                           int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_LGT
+#if CONFIG_LGT || (CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT32)
   av1_fht8x32_c(src_diff, coeff, diff_stride, txfm_param);
 #else
   av1_fht8x32(src_diff, coeff, diff_stride, txfm_param);

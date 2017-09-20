@@ -23,13 +23,11 @@
 #define CONFIG_COEFFICIENT_RANGE_CHECKING 1
 #define AV1_DCT_GTEST
 #include "av1/encoder/dct.c"
-#if CONFIG_DAALA_DCT4 || CONFIG_DAALA_DCT8 || CONFIG_DAALA_DCT16 || \
-    CONFIG_DAALA_DCT32
-#include "av1/common/daala_tx.c"
-#endif
 
 using libaom_test::ACMRandom;
 
+#if !CONFIG_DAALA_DCT4 || !CONFIG_DAALA_DCT8 || !CONFIG_DAALA_DCT16 || \
+    !CONFIG_DAALA_DCT32
 namespace {
 void reference_dct_1d(const double *in, double *out, int size) {
   const double kInvSqrt2 = 0.707106781186547524400844362104;
@@ -109,6 +107,11 @@ INSTANTIATE_TEST_CASE_P(C, AV1FwdTxfm,
                             FdctParam(&fdct4, &reference_dct_1d, 4, 1),
 #endif
                             FdctParam(&fdct8, &reference_dct_1d, 8, 1),
-                            FdctParam(&fdct16, &reference_dct_1d, 16, 2),
-                            FdctParam(&fdct32, &reference_dct_1d, 32, 3)));
+                            FdctParam(&fdct16, &reference_dct_1d, 16, 2)
+#if !CONFIG_DAALA_DCT8 || !CONFIG_DAALA_DCT16 || !CONFIG_DAALA_DCT32
+                                ,
+                            FdctParam(&fdct32, &reference_dct_1d, 32, 3)
+#endif
+                                ));
 }  // namespace
+#endif
