@@ -1687,6 +1687,26 @@ void av1_fht8x16_c(const int16_t *input, tran_low_t *output, int stride,
   assert(tx_type == DCT_DCT);
 #endif
   static const transform_2d FHT[] = {
+#if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16
+    { daala_fdct16, daala_fdct8 },  // DCT_DCT
+    { daala_fdst16, daala_fdct8 },  // ADST_DCT
+    { daala_fdct16, daala_fdst8 },  // DCT_ADST
+    { daala_fdst16, daala_fdst8 },  // ADST_ADST
+#if CONFIG_EXT_TX
+    { daala_fdst16, daala_fdct8 },  // FLIPADST_DCT
+    { daala_fdct16, daala_fdst8 },  // DCT_FLIPADST
+    { daala_fdst16, daala_fdst8 },  // FLIPADST_FLIPADST
+    { daala_fdst16, daala_fdst8 },  // ADST_FLIPADST
+    { daala_fdst16, daala_fdst8 },  // FLIPADST_ADST
+    { daala_idtx16, daala_idtx8 },  // IDTX
+    { daala_fdct16, daala_idtx8 },  // V_DCT
+    { daala_idtx16, daala_fdct8 },  // H_DCT
+    { daala_fdst16, daala_idtx8 },  // V_ADST
+    { daala_idtx16, daala_fdst8 },  // H_ADST
+    { daala_fdst16, daala_idtx8 },  // V_FLIPADST
+    { daala_idtx16, daala_fdst8 },  // H_FLIPADST
+#endif
+#else
     { fdct16, fdct8 },    // DCT_DCT
     { fadst16, fdct8 },   // ADST_DCT
     { fdct16, fadst8 },   // DCT_ADST
@@ -1704,6 +1724,7 @@ void av1_fht8x16_c(const int16_t *input, tran_low_t *output, int stride,
     { fidtx16, fadst8 },  // H_ADST
     { fadst16, fidtx8 },  // V_FLIPADST
     { fidtx16, fadst8 },  // H_FLIPADST
+#endif
 #endif
   };
   const transform_2d ht = FHT[tx_type];
@@ -1724,24 +1745,40 @@ void av1_fht8x16_c(const int16_t *input, tran_low_t *output, int stride,
 
   // Rows
   for (i = 0; i < n2; ++i) {
-    for (j = 0; j < n; ++j)
+    for (j = 0; j < n; ++j) {
+#if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16
+      temp_in[j] = input[i * stride + j] * 16;
+#else
       temp_in[j] =
           (tran_low_t)fdct_round_shift(input[i * stride + j] * 4 * Sqrt2);
+#endif
+    }
 #if CONFIG_LGT
     if (use_lgt_row)
       flgt8(temp_in, temp_out, lgtmtx_row[0]);
     else
 #endif
       ht.rows(temp_in, temp_out);
-    for (j = 0; j < n; ++j)
+    for (j = 0; j < n; ++j) {
+#if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16
+      out[j * n2 + i] = temp_out[j];
+#else
       out[j * n2 + i] = ROUND_POWER_OF_TWO_SIGNED(temp_out[j], 2);
+#endif
+    }
   }
 
   // Columns
   for (i = 0; i < n; ++i) {
     for (j = 0; j < n2; ++j) temp_in[j] = out[j + i * n2];
     ht.cols(temp_in, temp_out);
-    for (j = 0; j < n2; ++j) output[i + j * n] = temp_out[j];
+    for (j = 0; j < n2; ++j) {
+#if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16
+      output[i + j * n] = (temp_out[j] + (temp_out[j] < 0)) >> 1;
+#else
+      output[i + j * n] = temp_out[j];
+#endif
+    }
   }
   // Note: overall scale factor of transform is 8 times unitary
 }
@@ -1756,6 +1793,26 @@ void av1_fht16x8_c(const int16_t *input, tran_low_t *output, int stride,
   assert(tx_type == DCT_DCT);
 #endif
   static const transform_2d FHT[] = {
+#if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16
+    { daala_fdct8, daala_fdct16 },  // DCT_DCT
+    { daala_fdst8, daala_fdct16 },  // ADST_DCT
+    { daala_fdct8, daala_fdst16 },  // DCT_ADST
+    { daala_fdst8, daala_fdst16 },  // ADST_ADST
+#if CONFIG_EXT_TX
+    { daala_fdst8, daala_fdct16 },  // FLIPADST_DCT
+    { daala_fdct8, daala_fdst16 },  // DCT_FLIPADST
+    { daala_fdst8, daala_fdst16 },  // FLIPADST_FLIPADST
+    { daala_fdst8, daala_fdst16 },  // ADST_FLIPADST
+    { daala_fdst8, daala_fdst16 },  // FLIPADST_ADST
+    { daala_idtx8, daala_idtx16 },  // IDTX
+    { daala_fdct8, daala_idtx16 },  // V_DCT
+    { daala_idtx8, daala_fdct16 },  // H_DCT
+    { daala_fdst8, daala_idtx16 },  // V_ADST
+    { daala_idtx8, daala_fdst16 },  // H_ADST
+    { daala_fdst8, daala_idtx16 },  // V_FLIPADST
+    { daala_idtx8, daala_fdst16 },  // H_FLIPADST
+#endif
+#else
     { fdct8, fdct16 },    // DCT_DCT
     { fadst8, fdct16 },   // ADST_DCT
     { fdct8, fadst16 },   // DCT_ADST
@@ -1773,6 +1830,7 @@ void av1_fht16x8_c(const int16_t *input, tran_low_t *output, int stride,
     { fidtx8, fadst16 },  // H_ADST
     { fadst8, fidtx16 },  // V_FLIPADST
     { fidtx8, fadst16 },  // H_FLIPADST
+#endif
 #endif
   };
   const transform_2d ht = FHT[tx_type];
@@ -1793,24 +1851,40 @@ void av1_fht16x8_c(const int16_t *input, tran_low_t *output, int stride,
 
   // Columns
   for (i = 0; i < n2; ++i) {
-    for (j = 0; j < n; ++j)
+    for (j = 0; j < n; ++j) {
+#if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16
+      temp_in[j] = input[j * stride + i] * 16;
+#else
       temp_in[j] =
           (tran_low_t)fdct_round_shift(input[j * stride + i] * 4 * Sqrt2);
+#endif
+    }
 #if CONFIG_LGT
     if (use_lgt_col)
       flgt8(temp_in, temp_out, lgtmtx_col[0]);
     else
 #endif
       ht.cols(temp_in, temp_out);
-    for (j = 0; j < n; ++j)
+    for (j = 0; j < n; ++j) {
+#if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16
+      out[j * n2 + i] = temp_out[j];
+#else
       out[j * n2 + i] = ROUND_POWER_OF_TWO_SIGNED(temp_out[j], 2);
+#endif
+    }
   }
 
   // Rows
   for (i = 0; i < n; ++i) {
     for (j = 0; j < n2; ++j) temp_in[j] = out[j + i * n2];
     ht.rows(temp_in, temp_out);
-    for (j = 0; j < n2; ++j) output[j + i * n2] = temp_out[j];
+    for (j = 0; j < n2; ++j) {
+#if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16
+      output[j + i * n2] = (temp_out[j] + (temp_out[j] < 0)) >> 1;
+#else
+      output[j + i * n2] = temp_out[j];
+#endif
+    }
   }
   // Note: overall scale factor of transform is 8 times unitary
 }
