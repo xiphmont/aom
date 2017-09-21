@@ -1995,10 +1995,10 @@ static void idct64x64_add(const tran_low_t *input, uint8_t *dest, int stride,
 #if CONFIG_CHROMA_2X2
 static void inv_txfm_add_2x2(const tran_low_t *input, uint8_t *dest, int stride,
                              const TxfmParam *txfm_param) {
-  tran_high_t a1 = input[0] >> UNIT_QUANT_SHIFT;
-  tran_high_t b1 = input[1] >> UNIT_QUANT_SHIFT;
-  tran_high_t c1 = input[2] >> UNIT_QUANT_SHIFT;
-  tran_high_t d1 = input[3] >> UNIT_QUANT_SHIFT;
+  tran_high_t a1 = input[0] >> 2;
+  tran_high_t b1 = input[1] >> 2;
+  tran_high_t c1 = input[2] >> 2;
+  tran_high_t d1 = input[3] >> 2;
 
   tran_high_t a2 = a1 + c1;
   tran_high_t b2 = b1 + d1;
