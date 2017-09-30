@@ -47,149 +47,83 @@ static void fwd_txfm_4x4(const int16_t *src_diff, tran_low_t *coeff,
                          int diff_stride, TxfmParam *txfm_param) {
   if (txfm_param->lossless) {
     assert(txfm_param->tx_type == DCT_DCT);
-    av1_fwht4x4(src_diff, coeff, diff_stride);
+    av1_fwht4x4_c(src_diff, coeff, diff_stride);
     return;
   }
-
-#if CONFIG_LGT || CONFIG_DAALA_DCT4
-  // only C version has LGTs
   av1_fht4x4_c(src_diff, coeff, diff_stride, txfm_param);
-#else
-  av1_fht4x4(src_diff, coeff, diff_stride, txfm_param);
-#endif
 }
 
 static void fwd_txfm_4x8(const int16_t *src_diff, tran_low_t *coeff,
                          int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_LGT || (CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8)
   av1_fht4x8_c(src_diff, coeff, diff_stride, txfm_param);
-#else
-  av1_fht4x8(src_diff, coeff, diff_stride, txfm_param);
-#endif
 }
 
 static void fwd_txfm_8x4(const int16_t *src_diff, tran_low_t *coeff,
                          int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_LGT || (CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8)
   av1_fht8x4_c(src_diff, coeff, diff_stride, txfm_param);
-#else
-  av1_fht8x4(src_diff, coeff, diff_stride, txfm_param);
-#endif
 }
 
 static void fwd_txfm_8x16(const int16_t *src_diff, tran_low_t *coeff,
                           int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_LGT || (CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16)
   av1_fht8x16_c(src_diff, coeff, diff_stride, txfm_param);
-#else
-  av1_fht8x16(src_diff, coeff, diff_stride, txfm_param);
-#endif
 }
 
 static void fwd_txfm_16x8(const int16_t *src_diff, tran_low_t *coeff,
                           int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_LGT || (CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16)
   av1_fht16x8_c(src_diff, coeff, diff_stride, txfm_param);
-#else
-  av1_fht16x8(src_diff, coeff, diff_stride, txfm_param);
-#endif
 }
 
 static void fwd_txfm_16x32(const int16_t *src_diff, tran_low_t *coeff,
                            int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_DAALA_DCT16 && CONFIG_DAALA_DCT32
   av1_fht16x32_c(src_diff, coeff, diff_stride, txfm_param);
-#else
-  av1_fht16x32(src_diff, coeff, diff_stride, txfm_param);
-#endif
 }
 
 static void fwd_txfm_32x16(const int16_t *src_diff, tran_low_t *coeff,
                            int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_DAALA_DCT16 && CONFIG_DAALA_DCT32
   av1_fht32x16_c(src_diff, coeff, diff_stride, txfm_param);
-#else
-  av1_fht32x16(src_diff, coeff, diff_stride, txfm_param);
-#endif
 }
 
 static void fwd_txfm_8x8(const int16_t *src_diff, tran_low_t *coeff,
                          int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_LGT || CONFIG_DAALA_DCT8
   av1_fht8x8_c(src_diff, coeff, diff_stride, txfm_param);
-#else
-  av1_fht8x8(src_diff, coeff, diff_stride, txfm_param);
-#endif
 }
 
 static void fwd_txfm_16x16(const int16_t *src_diff, tran_low_t *coeff,
                            int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_DAALA_DCT16
   av1_fht16x16_c(src_diff, coeff, diff_stride, txfm_param);
-#else
-  av1_fht16x16(src_diff, coeff, diff_stride, txfm_param);
-#endif  // CONFIG_DAALA_DCT16
 }
 
 static void fwd_txfm_32x32(const int16_t *src_diff, tran_low_t *coeff,
                            int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_MRC_TX
-  // MRC_DCT currently only has a C implementation
-  if (txfm_param->tx_type == MRC_DCT) {
-    av1_fht32x32_c(src_diff, coeff, diff_stride, txfm_param);
-    return;
-  }
-#endif  // CONFIG_MRC_TX
-  av1_fht32x32(src_diff, coeff, diff_stride, txfm_param);
+  av1_fht32x32_c(src_diff, coeff, diff_stride, txfm_param);
 }
 
 #if CONFIG_TX64X64
 static void fwd_txfm_64x64(const int16_t *src_diff, tran_low_t *coeff,
                            int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_EXT_TX
-  if (txfm_param->tx_type == IDTX)
-    av1_fwd_idtx_c(src_diff, coeff, diff_stride, 64, txfm_param->tx_type);
-  else
-#endif
-    av1_fht64x64(src_diff, coeff, diff_stride, txfm_param);
+  av1_fwd_idtx_c(src_diff, coeff, diff_stride, 64, txfm_param->tx_type);
 }
 #endif  // CONFIG_TX64X64
 
 #if CONFIG_RECT_TX_EXT && (CONFIG_EXT_TX || CONFIG_VAR_TX)
 static void fwd_txfm_16x4(const int16_t *src_diff, tran_low_t *coeff,
                           int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_LGT || (CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT16)
   av1_fht16x4_c(src_diff, coeff, diff_stride, txfm_param);
-#else
-  av1_fht16x4(src_diff, coeff, diff_stride, txfm_param);
-#endif
 }
 
 static void fwd_txfm_4x16(const int16_t *src_diff, tran_low_t *coeff,
                           int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_LGT || (CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT16)
   av1_fht4x16_c(src_diff, coeff, diff_stride, txfm_param);
-#else
-  av1_fht4x16(src_diff, coeff, diff_stride, txfm_param);
-#endif
 }
 
 static void fwd_txfm_32x8(const int16_t *src_diff, tran_low_t *coeff,
                           int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_LGT || (CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT32)
   av1_fht32x8_c(src_diff, coeff, diff_stride, txfm_param);
-#else
-  av1_fht32x8(src_diff, coeff, diff_stride, txfm_param);
-#endif
 }
 
 static void fwd_txfm_8x32(const int16_t *src_diff, tran_low_t *coeff,
                           int diff_stride, TxfmParam *txfm_param) {
-#if CONFIG_LGT || (CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT32)
   av1_fht8x32_c(src_diff, coeff, diff_stride, txfm_param);
-#else
-  av1_fht8x32(src_diff, coeff, diff_stride, txfm_param);
-#endif
 }
 #endif
 
@@ -230,37 +164,7 @@ static void highbd_fwd_txfm_4x4(const int16_t *src_diff, tran_low_t *coeff,
     av1_highbd_fwht4x4(src_diff, coeff, diff_stride);
     return;
   }
-  switch (tx_type) {
-    case DCT_DCT:
-    case ADST_DCT:
-    case DCT_ADST:
-    case ADST_ADST:
-      // fallthrough intended
-      av1_fwd_txfm2d_4x4(src_diff, dst_coeff, diff_stride, tx_type, bd);
-      break;
-#if CONFIG_EXT_TX
-    case FLIPADST_DCT:
-    case DCT_FLIPADST:
-    case FLIPADST_FLIPADST:
-    case ADST_FLIPADST:
-    case FLIPADST_ADST:
-      // fallthrough intended
-      av1_fwd_txfm2d_4x4(src_diff, dst_coeff, diff_stride, tx_type, bd);
-      break;
-    // use the c version for anything including identity for now
-    case V_DCT:
-    case H_DCT:
-    case V_ADST:
-    case H_ADST:
-    case V_FLIPADST:
-    case H_FLIPADST:
-    case IDTX:
-      // fallthrough intended
-      av1_fwd_txfm2d_4x4_c(src_diff, dst_coeff, diff_stride, tx_type, bd);
-      break;
-#endif  // CONFIG_EXT_TX
-    default: assert(0);
-  }
+  av1_fwd_txfm2d_4x4(src_diff, dst_coeff, diff_stride, tx_type, bd);
 }
 
 static void highbd_fwd_txfm_4x8(const int16_t *src_diff, tran_low_t *coeff,
@@ -310,37 +214,7 @@ static void highbd_fwd_txfm_8x8(const int16_t *src_diff, tran_low_t *coeff,
   int32_t *dst_coeff = (int32_t *)coeff;
   const int tx_type = txfm_param->tx_type;
   const int bd = txfm_param->bd;
-  switch (tx_type) {
-    case DCT_DCT:
-    case ADST_DCT:
-    case DCT_ADST:
-    case ADST_ADST:
-      // fallthrough intended
-      av1_fwd_txfm2d_8x8(src_diff, dst_coeff, diff_stride, tx_type, bd);
-      break;
-#if CONFIG_EXT_TX
-    case FLIPADST_DCT:
-    case DCT_FLIPADST:
-    case FLIPADST_FLIPADST:
-    case ADST_FLIPADST:
-    case FLIPADST_ADST:
-      // fallthrough intended
-      av1_fwd_txfm2d_8x8(src_diff, dst_coeff, diff_stride, tx_type, bd);
-      break;
-    // use the c version for anything including identity for now
-    case V_DCT:
-    case H_DCT:
-    case V_ADST:
-    case H_ADST:
-    case V_FLIPADST:
-    case H_FLIPADST:
-    case IDTX:
-      // fallthrough intended
-      av1_fwd_txfm2d_8x8_c(src_diff, dst_coeff, diff_stride, tx_type, bd);
-      break;
-#endif  // CONFIG_EXT_TX
-    default: assert(0);
-  }
+  av1_fwd_txfm2d_8x8_c(src_diff, dst_coeff, diff_stride, tx_type, bd);
 }
 
 static void highbd_fwd_txfm_16x16(const int16_t *src_diff, tran_low_t *coeff,
@@ -348,37 +222,7 @@ static void highbd_fwd_txfm_16x16(const int16_t *src_diff, tran_low_t *coeff,
   int32_t *dst_coeff = (int32_t *)coeff;
   const int tx_type = txfm_param->tx_type;
   const int bd = txfm_param->bd;
-  switch (tx_type) {
-    case DCT_DCT:
-    case ADST_DCT:
-    case DCT_ADST:
-    case ADST_ADST:
-      // fallthrough intended
-      av1_fwd_txfm2d_16x16(src_diff, dst_coeff, diff_stride, tx_type, bd);
-      break;
-#if CONFIG_EXT_TX
-    case FLIPADST_DCT:
-    case DCT_FLIPADST:
-    case FLIPADST_FLIPADST:
-    case ADST_FLIPADST:
-    case FLIPADST_ADST:
-      // fallthrough intended
-      av1_fwd_txfm2d_16x16(src_diff, dst_coeff, diff_stride, tx_type, bd);
-      break;
-    // use the c version for anything including identity for now
-    case V_DCT:
-    case H_DCT:
-    case V_ADST:
-    case H_ADST:
-    case V_FLIPADST:
-    case H_FLIPADST:
-    case IDTX:
-      // fallthrough intended
-      av1_fwd_txfm2d_16x16_c(src_diff, dst_coeff, diff_stride, tx_type, bd);
-      break;
-#endif  // CONFIG_EXT_TX
-    default: assert(0);
-  }
+  av1_fwd_txfm2d_16x16_c(src_diff, dst_coeff, diff_stride, tx_type, bd);
 }
 
 static void highbd_fwd_txfm_32x32(const int16_t *src_diff, tran_low_t *coeff,
@@ -386,37 +230,7 @@ static void highbd_fwd_txfm_32x32(const int16_t *src_diff, tran_low_t *coeff,
   int32_t *dst_coeff = (int32_t *)coeff;
   const int tx_type = txfm_param->tx_type;
   const int bd = txfm_param->bd;
-  switch (tx_type) {
-    case DCT_DCT:
-    case ADST_DCT:
-    case DCT_ADST:
-    case ADST_ADST:
-      // fallthrough intended
-      av1_fwd_txfm2d_32x32(src_diff, dst_coeff, diff_stride, tx_type, bd);
-      break;
-#if CONFIG_EXT_TX
-    case FLIPADST_DCT:
-    case DCT_FLIPADST:
-    case FLIPADST_FLIPADST:
-    case ADST_FLIPADST:
-    case FLIPADST_ADST:
-      // fallthrough intended
-      av1_fwd_txfm2d_32x32(src_diff, dst_coeff, diff_stride, tx_type, bd);
-      break;
-    // use the c version for anything including identity for now
-    case V_DCT:
-    case H_DCT:
-    case V_ADST:
-    case H_ADST:
-    case V_FLIPADST:
-    case H_FLIPADST:
-    case IDTX:
-      // fallthrough intended
-      av1_fwd_txfm2d_32x32_c(src_diff, dst_coeff, diff_stride, tx_type, bd);
-      break;
-#endif  // CONFIG_EXT_TX
-    default: assert(0);
-  }
+  av1_fwd_txfm2d_32x32_c(src_diff, dst_coeff, diff_stride, tx_type, bd);
 }
 
 #if CONFIG_TX64X64
@@ -425,39 +239,7 @@ static void highbd_fwd_txfm_64x64(const int16_t *src_diff, tran_low_t *coeff,
   int32_t *dst_coeff = (int32_t *)coeff;
   const int tx_type = txfm_param->tx_type;
   const int bd = txfm_param->bd;
-  switch (tx_type) {
-    case DCT_DCT:
-      av1_fwd_txfm2d_64x64(src_diff, dst_coeff, diff_stride, tx_type, bd);
-      break;
-#if CONFIG_EXT_TX
-    case ADST_DCT:
-    case DCT_ADST:
-    case ADST_ADST:
-    case FLIPADST_DCT:
-    case DCT_FLIPADST:
-    case FLIPADST_FLIPADST:
-    case ADST_FLIPADST:
-    case FLIPADST_ADST:
-    case V_DCT:
-    case H_DCT:
-    case V_ADST:
-    case H_ADST:
-    case V_FLIPADST:
-    case H_FLIPADST:
-      // TODO(sarahparker)
-      // I've deleted the 64x64 implementations that existed in lieu
-      // of adst, flipadst and identity for simplicity but will bring back
-      // in a later change. This shouldn't impact performance since
-      // DCT_DCT is the only extended type currently allowed for 64x64,
-      // as dictated by get_ext_tx_set_type in blockd.h.
-      av1_fwd_txfm2d_64x64_c(src_diff, dst_coeff, diff_stride, DCT_DCT, bd);
-      break;
-    case IDTX:
-      av1_fwd_idtx_c(src_diff, dst_coeff, diff_stride, 64, tx_type);
-      break;
-#endif  // CONFIG_EXT_TX
-    default: assert(0); break;
-  }
+  av1_fwd_txfm2d_64x64_c(src_diff, dst_coeff, diff_stride, DCT_DCT, bd);
 }
 #endif  // CONFIG_TX64X64
 
