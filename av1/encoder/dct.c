@@ -1257,12 +1257,6 @@ void av1_fht4x4_c(const int16_t *input, tran_low_t *output, int stride,
 #if CONFIG_DCT_ONLY
   assert(tx_type == DCT_DCT);
 #endif
-#if !CONFIG_DAALA_DCT4
-  if (tx_type == DCT_DCT) {
-    aom_fdct4x4_c(input, output, stride);
-    return;
-  }
-#endif
   {
     static const transform_2d FHT[] = {
 #if CONFIG_DAALA_DCT4
@@ -1326,9 +1320,12 @@ void av1_fht4x4_c(const int16_t *input, tran_low_t *output, int stride,
 
     // Columns
     for (i = 0; i < 4; ++i) {
-      /* A C99-safe upshift by 4 for both Daala and VPx TX. */
+#if CONFIG_DAALA_DCT4
+      for (j = 0; j < 4; ++j)
+        temp_in[j] =
+          input[j * stride + i] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
+#else
       for (j = 0; j < 4; ++j) temp_in[j] = input[j * stride + i] * 16;
-#if !CONFIG_DAALA_DCT4
       if (i == 0 && temp_in[0]) temp_in[0] += 1;
 #endif
 #if CONFIG_LGT
@@ -1350,9 +1347,7 @@ void av1_fht4x4_c(const int16_t *input, tran_low_t *output, int stride,
 #endif
         ht.rows(temp_in, temp_out);
 #if CONFIG_DAALA_DCT4
-      /* Daala TX has orthonormal scaling; shift down by only 1 to achieve
-         the usual VPx coefficient left-shift of 3. */
-      for (j = 0; j < 4; ++j) output[j + i * 4] = temp_out[j] >> 1;
+      for (j = 0; j < 4; ++j) output[j + i * 4] = temp_out[j];
 #else
       for (j = 0; j < 4; ++j) output[j + i * 4] = (temp_out[j] + 1) >> 2;
 #endif
@@ -1432,7 +1427,8 @@ void av1_fht4x8_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < n2; ++i) {
     for (j = 0; j < n; ++j) {
 #if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8
-      temp_in[j] = input[i * stride + j] * 16;
+      temp_in[j] =
+        input[i * stride + j] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
 #else
       temp_in[j] =
           (tran_low_t)fdct_round_shift(input[i * stride + j] * 4 * Sqrt2);
@@ -1456,8 +1452,13 @@ void av1_fht4x8_c(const int16_t *input, tran_low_t *output, int stride,
     else
 #endif
       ht.cols(temp_in, temp_out);
-    for (j = 0; j < n2; ++j)
+    for (j = 0; j < n2; ++j) {
+#if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8
+      output[i + j * n] = temp_out[j];
+#else
       output[i + j * n] = (temp_out[j] + (temp_out[j] < 0)) >> 1;
+#endif
+    }
   }
   // Note: overall scale factor of transform is 8 times unitary
 }
@@ -1534,7 +1535,8 @@ void av1_fht8x4_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < n2; ++i) {
     for (j = 0; j < n; ++j) {
 #if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8
-      temp_in[j] = input[j * stride + i] * 16;
+      temp_in[j] =
+        input[j * stride + i] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
 #else
       temp_in[j] =
           (tran_low_t)fdct_round_shift(input[j * stride + i] * 4 * Sqrt2);
@@ -1558,8 +1560,13 @@ void av1_fht8x4_c(const int16_t *input, tran_low_t *output, int stride,
     else
 #endif
       ht.rows(temp_in, temp_out);
-    for (j = 0; j < n2; ++j)
+    for (j = 0; j < n2; ++j) {
+#if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT8
+      output[j + i * n2] = temp_out[j];
+#else
       output[j + i * n2] = (temp_out[j] + (temp_out[j] < 0)) >> 1;
+#endif
+    }
   }
   // Note: overall scale factor of transform is 8 times unitary
 }
@@ -1633,7 +1640,9 @@ void av1_fht4x16_c(const int16_t *input, tran_low_t *output, int stride,
   // Rows
   for (i = 0; i < n4; ++i) {
 #if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT16
-    for (j = 0; j < n; ++j) temp_in[j] = input[i * stride + j] * 16;
+    for (j = 0; j < n; ++j)
+      temp_in[j] =
+        input[i * stride + j] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
 #else
     for (j = 0; j < n; ++j) temp_in[j] = input[i * stride + j] * 4;
 #endif
@@ -1650,8 +1659,13 @@ void av1_fht4x16_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < n; ++i) {
     for (j = 0; j < n4; ++j) temp_in[j] = out[j + i * n4];
     ht.cols(temp_in, temp_out);
-    for (j = 0; j < n4; ++j)
+    for (j = 0; j < n4; ++j) {
+#if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT16
+      output[i + j * n] = temp_out[j];
+#else
       output[i + j * n] = (temp_out[j] + (temp_out[j] < 0)) >> 1;
+#endif
+    }
   }
   // Note: overall scale factor of transform is 8 times unitary
 }
@@ -1725,7 +1739,9 @@ void av1_fht16x4_c(const int16_t *input, tran_low_t *output, int stride,
   // Columns
   for (i = 0; i < n4; ++i) {
 #if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT16
-    for (j = 0; j < n; ++j) temp_in[j] = input[j * stride + i] * 16;
+    for (j = 0; j < n; ++j)
+      temp_in[j] =
+        input[j * stride + i] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
 #else
     for (j = 0; j < n; ++j) temp_in[j] = input[j * stride + i] * 4;
 #endif
@@ -1742,8 +1758,13 @@ void av1_fht16x4_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < n; ++i) {
     for (j = 0; j < n4; ++j) temp_in[j] = out[j + i * n4];
     ht.rows(temp_in, temp_out);
-    for (j = 0; j < n4; ++j)
+    for (j = 0; j < n4; ++j) {
+#if CONFIG_DAALA_DCT4 && CONFIG_DAALA_DCT16
+      output[j + i * n4] = temp_out[j];
+#else
       output[j + i * n4] = (temp_out[j] + (temp_out[j] < 0)) >> 1;
+#endif
+    }
   }
   // Note: overall scale factor of transform is 8 times unitary
 }
@@ -1818,7 +1839,8 @@ void av1_fht8x16_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < n2; ++i) {
     for (j = 0; j < n; ++j) {
 #if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16
-      temp_in[j] = input[i * stride + j] * 16;
+      temp_in[j] =
+        input[i * stride + j] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
 #else
       temp_in[j] =
           (tran_low_t)fdct_round_shift(input[i * stride + j] * 4 * Sqrt2);
@@ -1844,14 +1866,9 @@ void av1_fht8x16_c(const int16_t *input, tran_low_t *output, int stride,
     for (j = 0; j < n2; ++j) temp_in[j] = out[j + i * n2];
     ht.cols(temp_in, temp_out);
     for (j = 0; j < n2; ++j) {
-#if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16
-      output[i + j * n] = (temp_out[j] + (temp_out[j] < 0)) >> 1;
-#else
       output[i + j * n] = temp_out[j];
-#endif
     }
   }
-  // Note: overall scale factor of transform is 8 times unitary
 }
 
 void av1_fht16x8_c(const int16_t *input, tran_low_t *output, int stride,
@@ -1924,7 +1941,8 @@ void av1_fht16x8_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < n2; ++i) {
     for (j = 0; j < n; ++j) {
 #if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16
-      temp_in[j] = input[j * stride + i] * 16;
+      temp_in[j] =
+        input[j * stride + i] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
 #else
       temp_in[j] =
           (tran_low_t)fdct_round_shift(input[j * stride + i] * 4 * Sqrt2);
@@ -1950,11 +1968,7 @@ void av1_fht16x8_c(const int16_t *input, tran_low_t *output, int stride,
     for (j = 0; j < n2; ++j) temp_in[j] = out[j + i * n2];
     ht.rows(temp_in, temp_out);
     for (j = 0; j < n2; ++j) {
-#if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT16
-      output[j + i * n2] = (temp_out[j] + (temp_out[j] < 0)) >> 1;
-#else
       output[j + i * n2] = temp_out[j];
-#endif
     }
   }
   // Note: overall scale factor of transform is 8 times unitary
@@ -2030,7 +2044,8 @@ void av1_fht8x32_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < n4; ++i) {
     for (j = 0; j < n; ++j) {
 #if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT32
-      temp_in[j] = input[i * stride + j] * 16;
+      temp_in[j] =
+        input[i * stride + j] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
 #else
       temp_in[j] = input[i * stride + j] * 4;
 #endif
@@ -2050,7 +2065,7 @@ void av1_fht8x32_c(const int16_t *input, tran_low_t *output, int stride,
     ht.cols(temp_in, temp_out);
     for (j = 0; j < n4; ++j) {
 #if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT32
-      output[i + j * n] = ROUND_POWER_OF_TWO_SIGNED(temp_out[j], 1);
+      output[i + j * n] = temp_out[j];
 #else
       output[i + j * n] = ROUND_POWER_OF_TWO_SIGNED(temp_out[j], 2);
 #endif
@@ -2129,7 +2144,8 @@ void av1_fht32x8_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < n4; ++i) {
     for (j = 0; j < n; ++j) {
 #if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT32
-      temp_in[j] = input[j * stride + i] * 16;
+      temp_in[j] =
+        input[j * stride + i] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
 #else
       temp_in[j] = input[j * stride + i] * 4;
 #endif
@@ -2149,7 +2165,7 @@ void av1_fht32x8_c(const int16_t *input, tran_low_t *output, int stride,
     ht.rows(temp_in, temp_out);
     for (j = 0; j < n4; ++j) {
 #if CONFIG_DAALA_DCT8 && CONFIG_DAALA_DCT32
-      output[j + i * n4] = ROUND_POWER_OF_TWO_SIGNED(temp_out[j], 1);
+      output[j + i * n4] = temp_out[j];
 #else
       output[j + i * n4] = ROUND_POWER_OF_TWO_SIGNED(temp_out[j], 2);
 #endif
@@ -2223,7 +2239,8 @@ void av1_fht16x32_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < n2; ++i) {
     for (j = 0; j < n; ++j) {
 #if CONFIG_DAALA_DCT16 && CONFIG_DAALA_DCT32
-      temp_in[j] = input[i * stride + j] * 16;
+      temp_in[j] =
+        input[i * stride + j] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
 #else
       temp_in[j] =
           (tran_low_t)fdct_round_shift(input[i * stride + j] * 4 * Sqrt2);
@@ -2243,12 +2260,7 @@ void av1_fht16x32_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < n; ++i) {
     for (j = 0; j < n2; ++j) temp_in[j] = out[j + i * n2];
     ht.cols(temp_in, temp_out);
-#if CONFIG_DAALA_DCT16 && CONFIG_DAALA_DCT32
-    for (j = 0; j < n2; ++j)
-      output[i + j * n] = ROUND_POWER_OF_TWO_SIGNED(temp_out[j], 1);
-#else
     for (j = 0; j < n2; ++j) output[i + j * n] = temp_out[j];
-#endif
   }
   // Note: overall scale factor of transform is 4 times unitary
 }
@@ -2318,7 +2330,8 @@ void av1_fht32x16_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < n2; ++i) {
     for (j = 0; j < n; ++j) {
 #if CONFIG_DAALA_DCT16 && CONFIG_DAALA_DCT32
-      temp_in[j] = input[j * stride + i] * 16;
+      temp_in[j] =
+        input[j * stride + i] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
 #else
       temp_in[j] =
           (tran_low_t)fdct_round_shift(input[j * stride + i] * 4 * Sqrt2);
@@ -2338,12 +2351,7 @@ void av1_fht32x16_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < n; ++i) {
     for (j = 0; j < n2; ++j) temp_in[j] = out[j + i * n2];
     ht.rows(temp_in, temp_out);
-#if CONFIG_DAALA_DCT16 && CONFIG_DAALA_DCT32
-    for (j = 0; j < n2; ++j)
-      output[j + i * n2] = ROUND_POWER_OF_TWO_SIGNED(temp_out[j], 1);
-#else
     for (j = 0; j < n2; ++j) output[j + i * n2] = temp_out[j];
-#endif
   }
   // Note: overall scale factor of transform is 4 times unitary
 }
@@ -2425,7 +2433,9 @@ void av1_fht8x8_c(const int16_t *input, tran_low_t *output, int stride,
     // Columns
     for (i = 0; i < 8; ++i) {
 #if CONFIG_DAALA_DCT8
-      for (j = 0; j < 8; ++j) temp_in[j] = input[j * stride + i] * 16;
+      for (j = 0; j < 8; ++j)
+        temp_in[j] =
+          input[j * stride + i] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
 #else
       for (j = 0; j < 8; ++j) temp_in[j] = input[j * stride + i] * 4;
 #endif
@@ -2449,7 +2459,7 @@ void av1_fht8x8_c(const int16_t *input, tran_low_t *output, int stride,
         ht.rows(temp_in, temp_out);
 #if CONFIG_DAALA_DCT8
       for (j = 0; j < 8; ++j)
-        output[j + i * 8] = (temp_out[j] + (temp_out[j] < 0)) >> 1;
+        output[j + i * 8] = temp_out[j];
 #else
       for (j = 0; j < 8; ++j)
         output[j + i * 8] = (temp_out[j] + (temp_out[j] < 0)) >> 1;
@@ -2578,7 +2588,8 @@ void av1_fht16x16_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < 16; ++i) {
     for (j = 0; j < 16; ++j) {
 #if CONFIG_DAALA_DCT16
-      temp_in[j] = input[j * stride + i] * 16;
+      temp_in[j] =
+        input[j * stride + i] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
 #else
       temp_in[j] = input[j * stride + i] * 4;
 #endif
@@ -2598,11 +2609,7 @@ void av1_fht16x16_c(const int16_t *input, tran_low_t *output, int stride,
     for (j = 0; j < 16; ++j) temp_in[j] = out[j + i * 16];
     ht.rows(temp_in, temp_out);
     for (j = 0; j < 16; ++j) {
-#if CONFIG_DAALA_DCT16
-      output[j + i * 16] = (temp_out[j] + (temp_out[j] < 0)) >> 1;
-#else
       output[j + i * 16] = temp_out[j];
-#endif
     }
   }
 }
@@ -2684,7 +2691,8 @@ void av1_fht32x32_c(const int16_t *input, tran_low_t *output, int stride,
   for (i = 0; i < 32; ++i) {
     for (j = 0; j < 32; ++j) {
 #if CONFIG_DAALA_DCT32
-      temp_in[j] = input[j * stride + i] * 16;
+      temp_in[j] =
+        input[j * stride + i] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
 #else
       temp_in[j] = input[j * stride + i] * 4;
 #endif
@@ -2704,11 +2712,7 @@ void av1_fht32x32_c(const int16_t *input, tran_low_t *output, int stride,
     for (j = 0; j < 32; ++j) temp_in[j] = out[j + i * 32];
     ht.rows(temp_in, temp_out);
     for (j = 0; j < 32; ++j) {
-#if CONFIG_DAALA_DCT32
-      output[j + i * 32] = ROUND_POWER_OF_TWO_SIGNED(temp_out[j], 1);
-#else
       output[j + i * 32] = temp_out[j];
-#endif
     }
   }
 }
@@ -2817,7 +2821,9 @@ void av1_fht64x64_c(const int16_t *input, tran_low_t *output, int stride,
   // Columns
   for (i = 0; i < 64; ++i) {
 #if CONFIG_DAALA_DCT64
-    for (j = 0; j < 64; ++j) temp_in[j] = input[j * stride + i] * 16;
+    for (j = 0; j < 64; ++j)
+      temp_in[j] =
+        input[j * stride + i] * (1 << (TX_COEFF_DEPTH - txfm_param->bd));
     ht.cols(temp_in, temp_out);
     for (j = 0; j < 64; ++j) out[j * 64 + i] = temp_out[j];
 
@@ -2835,7 +2841,7 @@ void av1_fht64x64_c(const int16_t *input, tran_low_t *output, int stride,
     ht.rows(temp_in, temp_out);
     for (j = 0; j < 64; ++j)
 #if CONFIG_DAALA_DCT64
-      output[j + i * 64] = ROUND_POWER_OF_TWO_SIGNED(temp_out[j], 1);
+      output[j + i * 64] = temp_out[j];
 #else
       output[j + i * 64] =
           (tran_low_t)((temp_out[j] + 1 + (temp_out[j] < 0)) >> 2);
@@ -2844,19 +2850,4 @@ void av1_fht64x64_c(const int16_t *input, tran_low_t *output, int stride,
 }
 #endif  // CONFIG_TX64X64
 
-#if CONFIG_EXT_TX
-// Forward identity transform.
-void av1_fwd_idtx_c(const int16_t *src_diff, tran_low_t *coeff, int stride,
-                    int bs, int tx_type) {
-  int r, c;
-  const int shift = bs < 32 ? 3 : (bs < 64 ? 2 : 1);
-  if (tx_type == IDTX) {
-    for (r = 0; r < bs; ++r) {
-      for (c = 0; c < bs; ++c) coeff[c] = src_diff[c] * (1 << shift);
-      src_diff += stride;
-      coeff += bs;
-    }
-  }
-}
-#endif  // CONFIG_EXT_TX
 #endif  // !AV1_DCT_GTEST
