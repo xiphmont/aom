@@ -128,14 +128,11 @@ static int decode_coefs(MACROBLOCKD *xd, PLANE_TYPE type, tran_low_t *dqcoeff,
 
   uint8_t token_cache[MAX_TX_SQUARE];
   const uint8_t *band_translate = get_band_translate(tx_size);
-  int dq_shift;
   int v, token;
   int32_t dqv = dq[0];
 #if CONFIG_NEW_QUANT
   const tran_low_t *dqv_val = &dq_val[0][0];
 #endif  // CONFIG_NEW_QUANT
-
-  dq_shift = av1_get_tx_scale(tx_size);
 
   band = *band_translate++;
 
@@ -191,7 +188,6 @@ static int decode_coefs(MACROBLOCKD *xd, PLANE_TYPE type, tran_low_t *dqcoeff,
 
 #if CONFIG_NEW_QUANT
     v = av1_dequant_abscoeff_nuq(val, dqv, dqv_val);
-    v = dq_shift ? ROUND_POWER_OF_TWO(v, dq_shift) : v;
 #else
 #if CONFIG_AOM_QM
     // Apply quant matrix only for 2D transforms
@@ -199,7 +195,7 @@ static int decode_coefs(MACROBLOCKD *xd, PLANE_TYPE type, tran_low_t *dqcoeff,
       dqv = ((iqmatrix[scan[c]] * (int)dqv) + (1 << (AOM_QM_BITS - 1))) >>
             AOM_QM_BITS;
 #endif
-    v = (val * dqv) >> dq_shift;
+    v = val * dqv;
 #endif
 
     v = (int)check_range(aom_read_bit(r, ACCT_STR) ? -v : v, xd->bd);

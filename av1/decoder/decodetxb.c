@@ -58,7 +58,6 @@ uint8_t av1_read_coeffs_txb(const AV1_COMMON *const cm, MACROBLOCKD *xd,
   int c = 0;
   int update_eob = -1;
   const int16_t *const dequant = xd->plane[plane].seg_dequant[mbmi->segment_id];
-  const int shift = av1_get_tx_scale(tx_size);
   const int bwl = b_width_log2_lookup[txsize_to_bsize[tx_size]] + 2;
   const int height = tx_size_high[tx_size];
   int cul_level = 0;
@@ -292,7 +291,7 @@ uint8_t av1_read_coeffs_txb(const AV1_COMMON *const cm, MACROBLOCKD *xd,
     int16_t dqv = (c == 0) ? dequant[0] : dequant[1];
     tran_low_t *v = &tcoeffs[scan[c]];
     int sign = (*v) < 0;
-    *v = (abs(*v) * dqv) >> shift;
+    *v = abs(*v) * dqv;
     if (sign) *v = -(*v);
   }
 

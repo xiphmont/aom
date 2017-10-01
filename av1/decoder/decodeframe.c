@@ -317,7 +317,7 @@ static int av1_pvq_decode_helper(MACROBLOCKD *xd, tran_low_t *ref_coeff,
   int off;
   const int is_keyframe = 0;
   const int has_dc_skip = 1;
-  int coeff_shift = 3 - av1_get_tx_scale(bs);
+  int coeff_shift = TX_COEFF_DEPTH - 8;
   int hbd_downshift = 0;
   int rounding_mask;
   // DC quantizer for PVQ

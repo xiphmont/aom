@@ -1084,9 +1084,8 @@ int try_change_eob(int *new_eob, int coeff_idx, const TxbCache *txb_cache,
   return cost_diff;
 }
 
-static INLINE tran_low_t qcoeff_to_dqcoeff(tran_low_t qc, int dqv, int shift) {
-  int sgn = qc < 0 ? -1 : 1;
-  return sgn * ((abs(qc) * dqv) >> shift);
+static INLINE tran_low_t qcoeff_to_dqcoeff(tran_low_t qc, int dqv) {
+  return qc * dqv;
 }
 
 // TODO(angiebird): add static to this function it's called
@@ -1097,8 +1096,7 @@ void update_level_down(int coeff_idx, TxbCache *txb_cache, TxbInfo *txb_info) {
   const tran_low_t low_coeff = get_lower_coeff(qc);
   txb_info->qcoeff[coeff_idx] = low_coeff;
   const int dqv = txb_info->dequant[coeff_idx != 0];
-  txb_info->dqcoeff[coeff_idx] =
-      qcoeff_to_dqcoeff(low_coeff, dqv, txb_info->shift);
+  txb_info->dqcoeff[coeff_idx] = qcoeff_to_dqcoeff(low_coeff, dqv);
 
   const int row = coeff_idx >> txb_info->bwl;
   const int col = coeff_idx - (row << txb_info->bwl);
@@ -1377,9 +1375,8 @@ void test_try_change_eob(TxbInfo *txb_info, TxbProbs *txb_probs,
 }
 #endif
 
-static INLINE int64_t get_coeff_dist(tran_low_t tcoeff, tran_low_t dqcoeff,
-                                     int shift) {
-  const int64_t diff = (tcoeff - dqcoeff) * (1 << shift);
+static INLINE int64_t get_coeff_dist(tran_low_t tcoeff, tran_low_t dqcoeff) {
+  const int64_t diff = tcoeff - dqcoeff;
   const int64_t error = diff * diff;
   return error;
 }
@@ -1410,15 +1407,16 @@ void try_level_down_facade(LevelDownStats *stats, int scan_idx,
   const tran_low_t tqc = txb_info->tcoeff[coeff_idx];
   const int dqv = txb_info->dequant[coeff_idx != 0];
 
-  const tran_low_t dqc = qcoeff_to_dqcoeff(qc, dqv, txb_info->shift);
-  const int64_t dqc_dist = get_coeff_dist(tqc, dqc, txb_info->shift);
+  const tran_low_t dqc = qcoeff_to_dqcoeff(qc, dqv);
+  const int64_t dqc_dist = get_coeff_dist(tqc, dqc);
 
   stats->low_qc = get_lower_coeff(qc);
-  stats->low_dqc = qcoeff_to_dqcoeff(stats->low_qc, dqv, txb_info->shift);
-  const int64_t low_dqc_dist =
-      get_coeff_dist(tqc, stats->low_dqc, txb_info->shift);
+  stats->low_dqc = qcoeff_to_dqcoeff(stats->low_qc, dqv);
+  const int64_t low_dqc_dist = get_coeff_dist(tqc, stats->low_dqc);
 
-  stats->dist_diff = -dqc_dist + low_dqc_dist;
+  const int depth_shift = (TX_COEFF_DEPTH - 11)*2;
+  const int depth_round = 1 << (depth_shift - 1);
+  stats->dist_diff = low_dqc_dist - dqc_dist + depth_round >> depth_shift;
   stats->cost_diff = 0;
   stats->new_eob = txb_info->eob;
   if (scan_idx == txb_info->eob - 1 && abs(qc) == 1) {
@@ -1444,14 +1442,6 @@ static int optimize_txb(TxbInfo *txb_info, const LV_MAP_COEFF_COST *txb_costs,
   int64_t dist_diff = 0;
   int64_t rd_diff = 0;
   const int max_eob = tx_size_2d[txb_info->tx_size];
-
-#if TEST_OPTIMIZE_TXB
-  int64_t sse;
-  int64_t org_dist =
-      av1_block_error_c(txb_info->tcoeff, txb_info->dqcoeff, max_eob, &sse) *
-      (1 << (2 * txb_info->shift));
-  int org_cost = get_txb_cost(txb_info, txb_probs);
-#endif
 
   tran_low_t *org_qcoeff = txb_info->qcoeff;
   tran_low_t *org_dqcoeff = txb_info->dqcoeff;
@@ -1514,20 +1504,7 @@ static int optimize_txb(TxbInfo *txb_info, const LV_MAP_COEFF_COST *txb_costs,
     if (eob_fix == 0 && txb_info->qcoeff[coeff_idx] != 0) eob_fix = 1;
     if (si > txb_info->eob) si = txb_info->eob;
   }
-#if TEST_OPTIMIZE_TXB
-  int64_t new_dist =
-      av1_block_error_c(txb_info->tcoeff, txb_info->dqcoeff, max_eob, &sse) *
-      (1 << (2 * txb_info->shift));
-  int new_cost = get_txb_cost(txb_info, txb_probs);
-  int64_t ref_dist_diff = new_dist - org_dist;
-  int ref_cost_diff = new_cost - org_cost;
-  if (cost_diff != ref_cost_diff || dist_diff != ref_dist_diff)
-    printf(
-        "overall rd_diff %ld\ncost_diff %d ref_cost_diff%d\ndist_diff %ld "
-        "ref_dist_diff %ld\neob %d new_eob %d\n\n",
-        rd_diff, cost_diff, ref_cost_diff, dist_diff, ref_dist_diff, org_eob,
-        txb_info->eob);
-#endif
+
   if (dry_run) {
     txb_info->qcoeff = org_qcoeff;
     txb_info->dqcoeff = org_dqcoeff;
@@ -1565,7 +1542,6 @@ int av1_optimize_txb(const AV1_COMMON *cm, MACROBLOCK *x, int plane,
   const SCAN_ORDER *const scan_order = get_scan(cm, tx_size, tx_type, mbmi);
   const LV_MAP_COEFF_COST txb_costs = x->coeff_costs[txs_ctx][plane_type];
 
-  const int shift = av1_get_tx_scale(tx_size);
   const int64_t rdmult =
       (x->rdmult * plane_rd_mult[is_inter][plane_type] + 2) >> 2;
 
@@ -1573,7 +1549,7 @@ int av1_optimize_txb(const AV1_COMMON *cm, MACROBLOCK *x, int plane,
                        dqcoeff,
                        tcoeff,
                        dequant,
-                       shift,
+                       0,
                        tx_size,
                        txs_ctx,
                        tx_type,
