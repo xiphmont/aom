@@ -1416,7 +1416,7 @@ void try_level_down_facade(LevelDownStats *stats, int scan_idx,
 
   const int depth_shift = (TX_COEFF_DEPTH - 11)*2;
   const int depth_round = 1 << (depth_shift - 1);
-  stats->dist_diff = low_dqc_dist - dqc_dist + depth_round >> depth_shift;
+  stats->dist_diff = (low_dqc_dist - dqc_dist + depth_round) >> depth_shift;
   stats->cost_diff = 0;
   stats->new_eob = txb_info->eob;
   if (scan_idx == txb_info->eob - 1 && abs(qc) == 1) {

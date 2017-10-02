@@ -56,41 +56,6 @@ static INLINE int quantize_coeff_nuq(
   return (q != 0);
 }
 
-static INLINE int quantize_coeff_bigtx_nuq(
-    const tran_low_t coeffv, const int16_t quant, const int16_t quant_shift,
-    const int16_t dequant, const tran_low_t *cuml_bins_ptr,
-    const tran_low_t *dequant_val, tran_low_t *qcoeff_ptr,
-    tran_low_t *dqcoeff_ptr, int logsizeby16) {
-  const int coeff = coeffv;
-  const int coeff_sign = (coeff >> 31);
-  const int abs_coeff = (coeff ^ coeff_sign) - coeff_sign;
-  int i, q;
-  int tmp = clamp(abs_coeff, INT16_MIN, INT16_MAX);
-  for (i = 0; i < NUQ_KNOTS; i++) {
-    if (tmp < ROUND_POWER_OF_TWO(cuml_bins_ptr[i], logsizeby16)) {
-      q = i;
-      break;
-    }
-  }
-  if (i == NUQ_KNOTS) {
-    tmp -= ROUND_POWER_OF_TWO(cuml_bins_ptr[NUQ_KNOTS - 1], logsizeby16);
-    q = NUQ_KNOTS +
-        (((((tmp * quant) >> 16) + tmp) * quant_shift) >> (16 - logsizeby16));
-  }
-  if (q) {
-    *dqcoeff_ptr = ROUND_POWER_OF_TWO(
-        av1_dequant_abscoeff_nuq(q, dequant, dequant_val), logsizeby16);
-    // *dqcoeff_ptr = av1_dequant_abscoeff_nuq(q, dequant, dequant_val) >>
-    // (logsizeby16);
-    *qcoeff_ptr = (q ^ coeff_sign) - coeff_sign;
-    *dqcoeff_ptr = *qcoeff_ptr < 0 ? -*dqcoeff_ptr : *dqcoeff_ptr;
-  } else {
-    *qcoeff_ptr = 0;
-    *dqcoeff_ptr = 0;
-  }
-  return (q != 0);
-}
-
 static INLINE int quantize_coeff_fp_nuq(
     const tran_low_t coeffv, const int16_t quant, const int16_t dequant,
     const tran_low_t *cuml_bins_ptr, const tran_low_t *dequant_val,
@@ -112,42 +77,6 @@ static INLINE int quantize_coeff_fp_nuq(
   }
   if (q) {
     *dqcoeff_ptr = av1_dequant_abscoeff_nuq(q, dequant, dequant_val);
-    *qcoeff_ptr = (q ^ coeff_sign) - coeff_sign;
-    *dqcoeff_ptr = *qcoeff_ptr < 0 ? -*dqcoeff_ptr : *dqcoeff_ptr;
-  } else {
-    *qcoeff_ptr = 0;
-    *dqcoeff_ptr = 0;
-  }
-  return (q != 0);
-}
-
-static INLINE int quantize_coeff_bigtx_fp_nuq(
-    const tran_low_t coeffv, const int16_t quant, const int16_t dequant,
-    const tran_low_t *cuml_bins_ptr, const tran_low_t *dequant_val,
-    tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr, int logsizeby16) {
-  const int coeff = coeffv;
-  const int coeff_sign = (coeff >> 31);
-  const int abs_coeff = (coeff ^ coeff_sign) - coeff_sign;
-  int i, q;
-  int tmp = clamp(abs_coeff, INT16_MIN, INT16_MAX);
-  for (i = 0; i < NUQ_KNOTS; i++) {
-    if (tmp < ROUND_POWER_OF_TWO(cuml_bins_ptr[i], logsizeby16)) {
-      q = i;
-      break;
-    }
-  }
-  if (i == NUQ_KNOTS) {
-    q = NUQ_KNOTS +
-        ((((int64_t)tmp -
-           ROUND_POWER_OF_TWO(cuml_bins_ptr[NUQ_KNOTS - 1], logsizeby16)) *
-          quant) >>
-         (16 - logsizeby16));
-  }
-  if (q) {
-    *dqcoeff_ptr = ROUND_POWER_OF_TWO(
-        av1_dequant_abscoeff_nuq(q, dequant, dequant_val), logsizeby16);
-    // *dqcoeff_ptr = av1_dequant_abscoeff_nuq(q, dequant, dequant_val) >>
-    // (logsizeby16);
     *qcoeff_ptr = (q ^ coeff_sign) - coeff_sign;
     *dqcoeff_ptr = *qcoeff_ptr < 0 ? -*dqcoeff_ptr : *dqcoeff_ptr;
   } else {
@@ -701,73 +630,6 @@ static INLINE int highbd_quantize_coeff_fp_nuq(
   return (q != 0);
 }
 
-static INLINE int highbd_quantize_coeff_bigtx_fp_nuq(
-    const tran_low_t coeffv, const int16_t quant, const int16_t dequant,
-    const tran_low_t *cuml_bins_ptr, const tran_low_t *dequant_val,
-    tran_low_t *qcoeff_ptr, tran_low_t *dqcoeff_ptr, int logsizeby16) {
-  const int coeff = coeffv;
-  const int coeff_sign = (coeff >> 31);
-  const int abs_coeff = (coeff ^ coeff_sign) - coeff_sign;
-  int i, q;
-  int64_t tmp = clamp(abs_coeff, INT32_MIN, INT32_MAX);
-  for (i = 0; i < NUQ_KNOTS; i++) {
-    if (tmp < ROUND_POWER_OF_TWO(cuml_bins_ptr[i], logsizeby16)) {
-      q = i;
-      break;
-    }
-  }
-  if (i == NUQ_KNOTS) {
-    q = NUQ_KNOTS +
-        (int)(((tmp -
-                ROUND_POWER_OF_TWO(cuml_bins_ptr[NUQ_KNOTS - 1], logsizeby16)) *
-               quant) >>
-              (16 - logsizeby16));
-  }
-  if (q) {
-    *dqcoeff_ptr = ROUND_POWER_OF_TWO(
-        av1_dequant_abscoeff_nuq(q, dequant, dequant_val), logsizeby16);
-    *qcoeff_ptr = (q ^ coeff_sign) - coeff_sign;
-    *dqcoeff_ptr = *qcoeff_ptr < 0 ? -*dqcoeff_ptr : *dqcoeff_ptr;
-  } else {
-    *qcoeff_ptr = 0;
-    *dqcoeff_ptr = 0;
-  }
-  return (q != 0);
-}
-
-static INLINE int highbd_quantize_coeff_bigtx_nuq(
-    const tran_low_t coeffv, const int16_t quant, const int16_t quant_shift,
-    const int16_t dequant, const tran_low_t *cuml_bins_ptr,
-    const tran_low_t *dequant_val, tran_low_t *qcoeff_ptr,
-    tran_low_t *dqcoeff_ptr, int logsizeby16) {
-  const int coeff = coeffv;
-  const int coeff_sign = (coeff >> 31);
-  const int abs_coeff = (coeff ^ coeff_sign) - coeff_sign;
-  int i, q;
-  int64_t tmp = clamp(abs_coeff, INT32_MIN, INT32_MAX);
-  for (i = 0; i < NUQ_KNOTS; i++) {
-    if (tmp < ROUND_POWER_OF_TWO(cuml_bins_ptr[i], logsizeby16)) {
-      q = i;
-      break;
-    }
-  }
-  if (i == NUQ_KNOTS) {
-    tmp -= ROUND_POWER_OF_TWO(cuml_bins_ptr[NUQ_KNOTS - 1], logsizeby16);
-    q = NUQ_KNOTS + (int)(((((tmp * quant) >> 16) + tmp) * quant_shift) >>
-                          (16 - logsizeby16));
-  }
-  if (q) {
-    *dqcoeff_ptr = ROUND_POWER_OF_TWO(
-        av1_dequant_abscoeff_nuq(q, dequant, dequant_val), logsizeby16);
-    *qcoeff_ptr = (q ^ coeff_sign) - coeff_sign;
-    *dqcoeff_ptr = *qcoeff_ptr < 0 ? -*dqcoeff_ptr : *dqcoeff_ptr;
-  } else {
-    *qcoeff_ptr = 0;
-    *dqcoeff_ptr = 0;
-  }
-  return (q != 0);
-}
-
 void highbd_quantize_dc_nuq(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
                             int skip_block, const int16_t quant,
                             const int16_t quant_shift, const int16_t dequant,
@@ -933,18 +795,19 @@ static void invert_quant(int16_t *quant, int16_t *shift, int d) {
 
 static int get_qzbin_factor(int q, aom_bit_depth_t bit_depth) {
   const int quant = av1_dc_quant(q, 0, bit_depth);
+  const int scale = TX_COEFF_DEPTH - bit_depth - 3;
 #if CONFIG_HIGHBITDEPTH
   switch (bit_depth) {
-    case AOM_BITS_8: return q == 0 ? 64 : (quant < 148 ? 84 : 80);
-    case AOM_BITS_10: return q == 0 ? 64 : (quant < 592 ? 84 : 80);
-    case AOM_BITS_12: return q == 0 ? 64 : (quant < 2368 ? 84 : 80);
+  case AOM_BITS_8: return q == 0 ? 64 : ((quant>>scale) < 148 ? 84 : 80);
+  case AOM_BITS_10: return q == 0 ? 64 : ((quant>>scale) < 592 ? 84 : 80);
+  case AOM_BITS_12: return q == 0 ? 64 : ((quant>>scale) < 2368 ? 84 : 80);
     default:
       assert(0 && "bit_depth should be AOM_BITS_8, AOM_BITS_10 or AOM_BITS_12");
       return -1;
   }
 #else
   (void)bit_depth;
-  return q == 0 ? 64 : (quant < 148 ? 84 : 80);
+  return q == 0 ? 64 : ((quant>>scale) < 148 ? 84 : 80);
 #endif
 }
 

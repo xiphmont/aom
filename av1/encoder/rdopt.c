@@ -1310,11 +1310,7 @@ static void model_rd_from_sse(const AV1_COMP *const cpi,
                               int plane, int64_t sse, int *rate,
                               int64_t *dist) {
   const struct macroblockd_plane *const pd = &xd->plane[plane];
-  const int dequant_shift =
-#if CONFIG_HIGHBITDEPTH
-      (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) ? xd->bd - 5 :
-#endif  // CONFIG_HIGHBITDEPTH
-                                                    3;
+  const int dequant_shift = TX_COEFF_DEPTH - 8;
 
   // Fast approximate the modelling function.
   if (cpi->sf.simple_model_rd_from_var) {

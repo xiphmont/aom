@@ -350,7 +350,8 @@ static const int rd_frame_type_factor[FRAME_UPDATE_TYPES] = {
 };
 
 int av1_compute_rd_mult(const AV1_COMP *cpi, int qindex) {
-  const int64_t q = av1_dc_quant(qindex, 0, cpi->common.bit_depth);
+  int64_t q = av1_dc_quant(qindex, 0, cpi->common.bit_depth);
+  q >>= (TX_COEFF_DEPTH - cpi->common.bit_depth - 3);
 #if CONFIG_HIGHBITDEPTH
   int64_t rdmult = 0;
   switch (cpi->common.bit_depth) {
@@ -378,18 +379,19 @@ int av1_compute_rd_mult(const AV1_COMP *cpi, int qindex) {
 
 static int compute_rd_thresh_factor(int qindex, aom_bit_depth_t bit_depth) {
   double q;
+  int m = 1 << (TX_COEFF_DEPTH - bit_depth - 3);
 #if CONFIG_HIGHBITDEPTH
   switch (bit_depth) {
-    case AOM_BITS_8: q = av1_dc_quant(qindex, 0, AOM_BITS_8) / 4.0; break;
-    case AOM_BITS_10: q = av1_dc_quant(qindex, 0, AOM_BITS_10) / 16.0; break;
-    case AOM_BITS_12: q = av1_dc_quant(qindex, 0, AOM_BITS_12) / 64.0; break;
-    default:
-      assert(0 && "bit_depth should be AOM_BITS_8, AOM_BITS_10 or AOM_BITS_12");
-      return -1;
+  case AOM_BITS_8: q = av1_dc_quant(qindex, 0, AOM_BITS_8) / (4.0*m); break;
+  case AOM_BITS_10: q = av1_dc_quant(qindex, 0, AOM_BITS_10) / (16.0*m); break;
+  case AOM_BITS_12: q = av1_dc_quant(qindex, 0, AOM_BITS_12) / (64.0*m); break;
+  default:
+    assert(0 && "bit_depth should be AOM_BITS_8, AOM_BITS_10 or AOM_BITS_12");
+    return -1;
   }
 #else
   (void)bit_depth;
-  q = av1_dc_quant(qindex, 0, AOM_BITS_8) / 4.0;
+  q = av1_dc_quant(qindex, 0, AOM_BITS_8) / (4.0*m);
 #endif  // CONFIG_HIGHBITDEPTH
   // TODO(debargha): Adjust the function below.
   return AOMMAX((int)(pow(q, RD_THRESH_POW) * 5.12), 8);
@@ -1598,7 +1600,8 @@ void av1_update_rd_thresh_fact(const AV1_COMMON *const cm,
 
 int av1_get_intra_cost_penalty(int qindex, int qdelta,
                                aom_bit_depth_t bit_depth) {
-  const int q = av1_dc_quant(qindex, qdelta, bit_depth);
+  int q = av1_dc_quant(qindex, qdelta, bit_depth);
+  q >>= (TX_COEFF_DEPTH - bit_depth - 3);
 #if CONFIG_HIGHBITDEPTH
   switch (bit_depth) {
     case AOM_BITS_8: return 20 * q;

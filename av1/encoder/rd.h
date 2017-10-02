@@ -32,7 +32,7 @@ extern "C" {
 
 #define RDCOST(RM, R, D)                                          \
   (ROUND_POWER_OF_TWO(((int64_t)R) * (RM), AV1_PROB_COST_SHIFT) + \
-   (D << RDDIV_BITS))
+   ((D) << RDDIV_BITS))
 
 #define RDCOST_DBL(RM, R, D)                                       \
   (((((double)(R)) * (RM)) / (double)(1 << AV1_PROB_COST_SHIFT)) + \

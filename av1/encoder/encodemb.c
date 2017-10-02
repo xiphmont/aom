@@ -205,7 +205,7 @@ static int optimize_b_greedy(const AV1_COMMON *cm, MACROBLOCK *mb, int plane,
        */
       // compute the distortion for the first candidate
       // and the distortion for quantizing to 0.
-      int dx0 = abs(coeff[rc]);
+      int dx0 = coeff[rc];
       const int64_t d0 = ((int64_t)dx0 * dx0 + depth_round) >> depth_shift;
       const int x_a = x - 2 * sz - 1;
       int dqv;
