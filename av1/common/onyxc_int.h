@@ -290,8 +290,8 @@ typedef struct AV1Common {
   int y_dc_delta_q;
   int uv_dc_delta_q;
   int uv_ac_delta_q;
-  int16_t y_dequant[MAX_SEGMENTS][2];
-  int16_t uv_dequant[MAX_SEGMENTS][2];
+  int16_t y_dequantTX[MAX_SEGMENTS][2];
+  int16_t uv_dequantTX[MAX_SEGMENTS][2];
 
 #if CONFIG_AOM_QM
   // Global quant matrix tables
@@ -665,24 +665,16 @@ static INLINE void av1_init_macroblockd(AV1_COMMON *cm, MACROBLOCKD *xd,
 #endif
     xd->above_context[i] = cm->above_context[i];
     if (xd->plane[i].plane_type == PLANE_TYPE_Y) {
-      memcpy(xd->plane[i].seg_dequant, cm->y_dequant, sizeof(cm->y_dequant));
+      memcpy(xd->plane[i].seg_dequantTX, cm->y_dequantTX, sizeof(cm->y_dequantTX));
 #if CONFIG_AOM_QM
       memcpy(xd->plane[i].seg_iqmatrix, cm->y_iqmatrix, sizeof(cm->y_iqmatrix));
 #endif
 
-#if CONFIG_NEW_QUANT
-      memcpy(xd->plane[i].seg_dequant_nuq, cm->y_dequant_nuq,
-             sizeof(cm->y_dequant_nuq));
-#endif
     } else {
-      memcpy(xd->plane[i].seg_dequant, cm->uv_dequant, sizeof(cm->uv_dequant));
+      memcpy(xd->plane[i].seg_dequantTX, cm->uv_dequantTX, sizeof(cm->uv_dequantTX));
 #if CONFIG_AOM_QM
       memcpy(xd->plane[i].seg_iqmatrix, cm->uv_iqmatrix,
              sizeof(cm->uv_iqmatrix));
-#endif
-#if CONFIG_NEW_QUANT
-      memcpy(xd->plane[i].seg_dequant_nuq, cm->uv_dequant_nuq,
-             sizeof(cm->uv_dequant_nuq));
 #endif
     }
   }

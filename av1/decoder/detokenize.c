@@ -128,14 +128,11 @@ static int decode_coefs(MACROBLOCKD *xd, PLANE_TYPE type, tran_low_t *dqcoeff,
 
   uint8_t token_cache[MAX_TX_SQUARE];
   const uint8_t *band_translate = get_band_translate(tx_size);
-  int dq_shift;
   int v, token;
   int32_t dqv = dq[0];
 #if CONFIG_NEW_QUANT
   const tran_low_t *dqv_val = &dq_val[0][0];
 #endif  // CONFIG_NEW_QUANT
-
-  dq_shift = av1_get_tx_scale(tx_size);
 
   band = *band_translate++;
 
@@ -189,18 +186,13 @@ static int decode_coefs(MACROBLOCKD *xd, PLANE_TYPE type, tran_low_t *dqcoeff,
 
     val = token_to_value(r, token, tx_size, xd->bd);
 
-#if CONFIG_NEW_QUANT
-    v = av1_dequant_abscoeff_nuq(val, dqv, dqv_val);
-    v = dq_shift ? ROUND_POWER_OF_TWO(v, dq_shift) : v;
-#else
 #if CONFIG_AOM_QM
     // Apply quant matrix only for 2D transforms
     if (IS_2D_TRANSFORM(tx_type) && iqmatrix != NULL)
       dqv = ((iqmatrix[scan[c]] * (int)dqv) + (1 << (AOM_QM_BITS - 1))) >>
             AOM_QM_BITS;
 #endif
-    v = (val * dqv) >> dq_shift;
-#endif
+    v = val * dqv;
 
     v = (int)check_range(aom_read_bit(r, ACCT_STR) ? -v : v, xd->bd);
 
@@ -334,14 +326,9 @@ int av1_decode_block_tokens(AV1_COMMON *cm, MACROBLOCKD *const xd, int plane,
                             TX_TYPE tx_type, int16_t *max_scan_line,
                             aom_reader *r, int seg_id) {
   struct macroblockd_plane *const pd = &xd->plane[plane];
-  const int16_t *const dequant = pd->seg_dequant[seg_id];
+  const int16_t *const dequant = pd->seg_dequantTX[seg_id];
   const int ctx =
       get_entropy_context(tx_size, pd->above_context + x, pd->left_context + y);
-#if CONFIG_NEW_QUANT
-  const int ref = is_inter_block(&xd->mi[0]->mbmi);
-  int dq =
-      get_dq_profile_from_ctx(xd->qindex[seg_id], ctx, ref, pd->plane_type);
-#endif  //  CONFIG_NEW_QUANT
 
 #if CONFIG_MRC_TX && SIGNAL_ANY_MRC_MASK
   if (tx_type == MRC_DCT) decode_mrc_tokens(xd, tx_size, r);
@@ -349,13 +336,9 @@ int av1_decode_block_tokens(AV1_COMMON *cm, MACROBLOCKD *const xd, int plane,
 
   const int eob =
       decode_coefs(xd, pd->plane_type, pd->dqcoeff, tx_size, tx_type, dequant,
-#if CONFIG_NEW_QUANT
-                   pd->seg_dequant_nuq[seg_id][dq],
-#else
 #if CONFIG_AOM_QM
                    pd->seg_iqmatrix[seg_id],
 #endif  // CONFIG_AOM_QM
-#endif  // CONFIG_NEW_QUANT
                    ctx, sc->scan, sc->neighbors, max_scan_line, r);
   av1_set_contexts(xd, pd, plane, tx_size, eob > 0, x, y);
 #if CONFIG_ADAPT_SCAN

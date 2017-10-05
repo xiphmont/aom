@@ -131,7 +131,7 @@ static int optimize_b_greedy(const AV1_COMMON *cm, MACROBLOCK *mb, int plane,
   const tran_low_t *const coeff = BLOCK_OFFSET(p->coeff, block);
   tran_low_t *const qcoeff = BLOCK_OFFSET(p->qcoeff, block);
   tran_low_t *const dqcoeff = BLOCK_OFFSET(pd->dqcoeff, block);
-  const int16_t *const dequant_ptr = pd->dequant;
+  const int16_t *const dequant_ptr = p->dequantTX;
   const uint8_t *const band_translate = get_band_translate(tx_size);
   const TX_TYPE tx_type =
       av1_get_tx_type(plane_type, xd, blk_row, blk_col, block, tx_size);
@@ -139,7 +139,11 @@ static int optimize_b_greedy(const AV1_COMMON *cm, MACROBLOCK *mb, int plane,
       get_scan(cm, tx_size, tx_type, &xd->mi[0]->mbmi);
   const int16_t *const scan = scan_order->scan;
   const int16_t *const nb = scan_order->neighbors;
-  const int shift = av1_get_tx_scale(tx_size);
+
+  // Normalize coeff scaling to te old Q3/D11
+  int depth_shift = (TX_COEFF_DEPTH - 11)*2;
+  int depth_round = depth_shift > 1 ? (1 << (depth_shift - 1)) : 0;
+
 #if CONFIG_AOM_QM
   int seg_id = xd->mi[0]->mbmi.segment_id;
   // Use a flat matrix (i.e. no weighting) for 1D and Identity transforms
@@ -204,13 +208,8 @@ static int optimize_b_greedy(const AV1_COMMON *cm, MACROBLOCK *mb, int plane,
        */
       // compute the distortion for the first candidate
       // and the distortion for quantizing to 0.
-      int dx0 = abs(coeff[rc]) * (1 << shift);
-#if CONFIG_HIGHBITDEPTH
-      if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
-        dx0 >>= xd->bd - 8;
-      }
-#endif
-      const int64_t d0 = (int64_t)dx0 * dx0;
+      int dx0 = coeff[rc];
+      const int64_t d0 = ((int64_t)dx0 * dx0 + depth_round) >> depth_shift;
       const int x_a = x - 2 * sz - 1;
       int dqv;
 #if CONFIG_AOM_QM
@@ -224,41 +223,16 @@ static int optimize_b_greedy(const AV1_COMMON *cm, MACROBLOCK *mb, int plane,
       dqv = dequant_ptr[rc != 0];
 #endif
 
-      int dx = (dqcoeff[rc] - coeff[rc]) * (1 << shift);
-#if CONFIG_HIGHBITDEPTH
-      if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
-        int dx_sign = dx < 0 ? 1 : 0;
-        dx = abs(dx) >> (xd->bd - 8);
-        if (dx_sign) dx = -dx;
-      }
-#endif  // CONFIG_HIGHBITDEPTH
-      const int64_t d2 = (int64_t)dx * dx;
+      int dx = dqcoeff[rc] - coeff[rc];
+      const int64_t d2 = ((int64_t)dx * dx + depth_round) >> depth_shift;
 
       /* compute the distortion for the second candidate
        * x_a = x - 2 * sz + 1;
        */
       int64_t d2_a;
       if (x_a != 0) {
-#if CONFIG_NEW_QUANT
-        dx = av1_dequant_coeff_nuq(x, dqv, dequant_val[band_translate[i]]) -
-             (coeff[rc] * (1 << shift));
-#if CONFIG_HIGHBITDEPTH
-        if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
-          dx >>= xd->bd - 8;
-        }
-#endif  // CONFIG_HIGHBITDEPTH
-#else   // CONFIG_NEW_QUANT
-#if CONFIG_HIGHBITDEPTH
-        if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) {
-          dx -= ((dqv >> (xd->bd - 8)) + sz) ^ sz;
-        } else {
-          dx -= (dqv + sz) ^ sz;
-        }
-#else
         dx -= (dqv + sz) ^ sz;
-#endif  // CONFIG_HIGHBITDEPTH
-#endif  // CONFIG_NEW_QUANT
-        d2_a = (int64_t)dx * dx;
+        d2_a = ((int64_t)dx * dx + depth_round) >> depth_shift;
       } else {
         d2_a = d0;
       }
@@ -330,17 +304,7 @@ static int optimize_b_greedy(const AV1_COMMON *cm, MACROBLOCK *mb, int plane,
       int dqc_a = 0;
       if (best_x || best_eob_x) {
         if (x_a != 0) {
-#if CONFIG_NEW_QUANT
-          dqc_a = av1_dequant_abscoeff_nuq(abs(x_a), dqv,
-                                           dequant_val[band_translate[i]]);
-          dqc_a = shift ? ROUND_POWER_OF_TWO(dqc_a, shift) : dqc_a;
-          if (sz) dqc_a = -dqc_a;
-#else
-          if (x_a < 0)
-            dqc_a = -((-x_a * dqv) >> shift);
-          else
-            dqc_a = (x_a * dqv) >> shift;
-#endif  // CONFIG_NEW_QUANT
+          dqc_a = x_a * dqv;
         } else {
           dqc_a = 0;
         }  // if (x_a != 0)
@@ -525,7 +489,7 @@ void av1_xform_quant(const AV1_COMMON *cm, MACROBLOCK *x, int plane, int block,
 
   src_diff =
       &p->src_diff[(blk_row * diff_stride + blk_col) << tx_size_wide_log2[0]];
-  qparam.log_scale = av1_get_tx_scale(tx_size);
+  qparam.log_scale = 0;
 #if CONFIG_NEW_QUANT
   qparam.tx_size = tx_size;
   qparam.dq = get_dq_profile_from_ctx(x->qindex, ctx, is_inter, plane_type);
@@ -632,6 +596,7 @@ void av1_xform_quant(const AV1_COMMON *cm, MACROBLOCK *x, int plane, int block,
 #endif  // CONFIG_TXMG
 
   if (xform_quant_idx != AV1_XFORM_QUANT_SKIP_QUANT) {
+    /* XXXXXXX scale quantization according to TX depth */
     if (LIKELY(!x->skip_block)) {
       quant_func_list[xform_quant_idx][is_hbd](
           coeff, tx2d_size, p, qcoeff, pd, dqcoeff, eob, scan_order, &qparam);
@@ -1161,7 +1126,7 @@ PVQ_SKIP_TYPE av1_pvq_encode_helper(MACROBLOCK *x, tran_low_t *const coeff,
   const int tx_blk_size = tx_size_wide[tx_size];
   daala_enc_ctx *daala_enc = &x->daala_enc;
   PVQ_SKIP_TYPE ac_dc_coded;
-  int coeff_shift = 3 - av1_get_tx_scale(tx_size);
+  int coeff_shift = TX_COEFF_DEPTH - 8;
   int hbd_downshift = 0;
   int rounding_mask;
   int pvq_dc_quant;

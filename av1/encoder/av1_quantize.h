@@ -42,14 +42,6 @@ typedef void (*AV1_QUANT_FACADE)(const tran_low_t *coeff_ptr, intptr_t n_coeffs,
                                  const QUANT_PARAM *qparam);
 
 typedef struct {
-#if CONFIG_NEW_QUANT
-  DECLARE_ALIGNED(
-      16, tran_low_t,
-      y_cuml_bins_nuq[QUANT_PROFILES][QINDEX_RANGE][COEF_BANDS][NUQ_KNOTS]);
-  DECLARE_ALIGNED(
-      16, tran_low_t,
-      uv_cuml_bins_nuq[QUANT_PROFILES][QINDEX_RANGE][COEF_BANDS][NUQ_KNOTS]);
-#endif  // CONFIG_NEW_QUANT
   // 0: dc 1: ac 2-8: ac repeated to SIMD width
   DECLARE_ALIGNED(16, int16_t, y_quant[QINDEX_RANGE][8]);
   DECLARE_ALIGNED(16, int16_t, y_quant_shift[QINDEX_RANGE][8]);
@@ -70,14 +62,12 @@ typedef struct {
 } QUANTS;
 
 typedef struct {
-  DECLARE_ALIGNED(16, int16_t, y_dequant[QINDEX_RANGE][8]);   // 8: SIMD width
-  DECLARE_ALIGNED(16, int16_t, uv_dequant[QINDEX_RANGE][8]);  // 8: SIMD width
-#if CONFIG_NEW_QUANT
-  DECLARE_ALIGNED(16, dequant_val_type_nuq,
-                  y_dequant_val_nuq[QUANT_PROFILES][QINDEX_RANGE][COEF_BANDS]);
-  DECLARE_ALIGNED(16, dequant_val_type_nuq,
-                  uv_dequant_val_nuq[QUANT_PROFILES][QINDEX_RANGE][COEF_BANDS]);
-#endif  // CONFIG_NEW_QUANT
+  // Dequantizer for TX scaling
+  DECLARE_ALIGNED(16, int16_t, y_dequantTX[QINDEX_RANGE][8]);   // 8: SIMD width
+  DECLARE_ALIGNED(16, int16_t, uv_dequantTX[QINDEX_RANGE][8]);  // 8: SIMD width
+  // Dequantizers for use in RDO (Q3/D11 scaling)
+  DECLARE_ALIGNED(16, int16_t, y_dequant3[QINDEX_RANGE][8]);   // 8: SIMD width
+  DECLARE_ALIGNED(16, int16_t, uv_dequant3[QINDEX_RANGE][8]);  // 8: SIMD width
 } Dequants;
 
 struct AV1_COMP;

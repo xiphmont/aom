@@ -317,7 +317,7 @@ static int av1_pvq_decode_helper(MACROBLOCKD *xd, tran_low_t *ref_coeff,
   int off;
   const int is_keyframe = 0;
   const int has_dc_skip = 1;
-  int coeff_shift = 3 - av1_get_tx_scale(bs);
+  int coeff_shift = TX_COEFF_DEPTH - 8;
   int hbd_downshift = 0;
   int rounding_mask;
   // DC quantizer for PVQ
@@ -466,7 +466,7 @@ static int av1_pvq_decode_helper2(AV1_COMMON *cm, MACROBLOCKD *const xd,
     }
 #endif  // CONFIG_HIGHBITDEPTH
 
-    quant = &pd->seg_dequant[seg_id][0];  // aom's quantizer
+    quant = &pd->seg_dequantTX[seg_id][0];  // aom's quantizer
 
     eob = av1_pvq_decode_helper(xd, pvq_ref_coeff, dqcoeff, quant, plane,
                                 tx_size, tx_type, xdec, ac_dc_coded);
@@ -1765,6 +1765,21 @@ static void recon_ncobmc_intrpl_pred(AV1_COMMON *const cm,
 }
 #endif  // CONFIG_NCOBMC_ADAPT_WEIGHT
 
+static int scale_dequantTX(int q3, int bd){
+  int depth_scale = TX_COEFF_DEPTH - bd - 3;
+  int depth_round = depth_scale < -1 ? 1 << (-depth_scale-1) : 0;
+  int quantTX;
+  // quantizer with TX scaling
+  if (depth_scale > 0) {
+    quantTX = q3 << depth_scale;
+  }else{
+    // this is bull, but it prevents major breakage
+    quantTX = (q3 + depth_round) >> depth_scale;
+    if (quantTX < 4) quantTX = 4;
+  }
+  return quantTX;
+}
+
 static void decode_token_and_recon_block(AV1Decoder *const pbi,
                                          MACROBLOCKD *const xd, int mi_row,
                                          int mi_col, aom_reader *r,
@@ -1792,11 +1807,12 @@ static void decode_token_and_recon_block(AV1Decoder *const pbi,
       for (j = 0; j < MAX_MB_PLANE; ++j) {
         const int dc_delta_q = j == 0 ? cm->y_dc_delta_q : cm->uv_dc_delta_q;
         const int ac_delta_q = j == 0 ? 0 : cm->uv_ac_delta_q;
-
-        xd->plane[j].seg_dequant[i][0] =
-            av1_dc_quant(current_qindex, dc_delta_q, cm->bit_depth);
-        xd->plane[j].seg_dequant[i][1] =
-            av1_ac_quant(current_qindex, ac_delta_q, cm->bit_depth);
+        xd->plane[j].seg_dequantTX[i][0] = scale_dequantTX
+          (av1_dc_quant(current_qindex, dc_delta_q,cm->bit_depth),
+           cm->bit_depth);
+        xd->plane[j].seg_dequantTX[i][1] = scale_dequantTX
+          (av1_ac_quant(current_qindex, ac_delta_q, cm->bit_depth),
+           cm->bit_depth);
       }
     }
   }
@@ -2447,10 +2463,12 @@ static void decode_partition(AV1Decoder *const pbi, MACROBLOCKD *const xd,
           const int dc_delta_q = j == 0 ? cm->y_dc_delta_q : cm->uv_dc_delta_q;
           const int ac_delta_q = j == 0 ? 0 : cm->uv_ac_delta_q;
 
-          xd->plane[j].seg_dequant[i][0] =
-              av1_dc_quant(xd->current_qindex, dc_delta_q, cm->bit_depth);
-          xd->plane[j].seg_dequant[i][1] =
-              av1_ac_quant(xd->current_qindex, ac_delta_q, cm->bit_depth);
+          xd->plane[j].seg_dequantTX[i][0] = scale_dequantTX
+            (av1_dc_quant(current_qindex, dc_delta_q, cm->bit_depth),
+             cm->bit_depth);
+          xd->plane[j].seg_dequantTX[i][1] = scale_dequantTX
+            (av1_ac_quant(current_qindex, ac_delta_q, cm->bit_depth),
+             cm->bit_depth);
         }
       }
     }
@@ -2902,12 +2920,15 @@ static void setup_segmentation_dequant(AV1_COMMON *const cm) {
   const int max_segments = cm->seg.enabled ? MAX_SEGMENTS : 1;
   for (int i = 0; i < max_segments; ++i) {
     const int qindex = av1_get_qindex(&cm->seg, i, cm->base_qindex);
-    cm->y_dequant[i][0] = av1_dc_quant(qindex, cm->y_dc_delta_q, cm->bit_depth);
-    cm->y_dequant[i][1] = av1_ac_quant(qindex, 0, cm->bit_depth);
-    cm->uv_dequant[i][0] =
-        av1_dc_quant(qindex, cm->uv_dc_delta_q, cm->bit_depth);
-    cm->uv_dequant[i][1] =
-        av1_ac_quant(qindex, cm->uv_ac_delta_q, cm->bit_depth);
+
+    cm->y_dequantTX[i][0] = scale_dequantTX
+      (av1_dc_quant(qindex, cm->y_dc_delta_q, cm->bit_depth), cm->bit_depth);
+    cm->y_dequantTX[i][1] = scale_dequantTX
+      (av1_ac_quant(qindex, 0, cm->bit_depth), cm->bit_depth);
+    cm->uv_dequantTX[i][0] = scale_dequantTX
+      (av1_dc_quant(qindex, cm->uv_dc_delta_q, cm->bit_depth), cm->bit_depth);
+    cm->uv_dequantTX[i][1] = scale_dequantTX
+      (av1_ac_quant(qindex, cm->uv_ac_delta_q, cm->bit_depth), cm->bit_depth);
 #if CONFIG_AOM_QM
     const int lossless = qindex == 0 && cm->y_dc_delta_q == 0 &&
                          cm->uv_dc_delta_q == 0 && cm->uv_ac_delta_q == 0;

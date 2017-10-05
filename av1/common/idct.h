@@ -47,9 +47,6 @@ typedef struct {
 } highbd_transform_2d;
 #endif  // CONFIG_HIGHBITDEPTH
 
-#define MAX_TX_SCALE 1
-int av1_get_tx_scale(const TX_SIZE tx_size);
-
 void av1_iwht4x4_add(const tran_low_t *input, uint8_t *dest, int stride,
                      const TxfmParam *txfm_param);
 void av1_idct4x4_add(const tran_low_t *input, uint8_t *dest, int stride,

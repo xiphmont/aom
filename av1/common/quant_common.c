@@ -270,65 +270,33 @@ static const int16_t ac_qlookup_12[QINDEX_RANGE] = {
 #endif
 
 int16_t av1_dc_quant(int qindex, int delta, aom_bit_depth_t bit_depth) {
-  int scale = TX_COEFF_DEPTH - bit_depth - 3;
-  int16_t quant;
-  int16_t quant3;
 #if CONFIG_HIGHBITDEPTH
   switch (bit_depth) {
-    case AOM_BITS_8:
-      quant3 = dc_qlookup[clamp(qindex + delta, 0, MAXQ)];
-      break;
-    case AOM_BITS_10:
-      quant3 = dc_qlookup_10[clamp(qindex + delta, 0, MAXQ)];
-      break;
-    case AOM_BITS_12:
-      quant3 = dc_qlookup_12[clamp(qindex + delta, 0, MAXQ)];
-      break;
+    case AOM_BITS_8: return dc_qlookup[clamp(qindex + delta, 0, MAXQ)];
+    case AOM_BITS_10: return dc_qlookup_10[clamp(qindex + delta, 0, MAXQ)];
+    case AOM_BITS_12: return dc_qlookup_12[clamp(qindex + delta, 0, MAXQ)];
     default:
       assert(0 && "bit_depth should be AOM_BITS_8, AOM_BITS_10 or AOM_BITS_12");
       return -1;
   }
 #else
-  quant3 = dc_qlookup[clamp(qindex + delta, 0, MAXQ)];
+  return dc_qlookup[clamp(qindex + delta, 0, MAXQ)];
 #endif
-  if(scale < 0) {
-    quant = quant3 >> -scale;
-    if(quant < 4) quant = 4;
-  } else {
-    quant = quant3 * (1 << scale);
-  }
-  return quant;
 }
 
 int16_t av1_ac_quant(int qindex, int delta, aom_bit_depth_t bit_depth) {
-  int scale = TX_COEFF_DEPTH - bit_depth - 3;
-  int16_t quant;
-  int16_t quant3;
 #if CONFIG_HIGHBITDEPTH
   switch (bit_depth) {
-    case AOM_BITS_8:
-      quant3 = ac_qlookup[clamp(qindex + delta, 0, MAXQ)];
-      break;
-    case AOM_BITS_10:
-      quant3 = ac_qlookup_10[clamp(qindex + delta, 0, MAXQ)];
-      break;
-    case AOM_BITS_12:
-      quant3 = ac_qlookup_12[clamp(qindex + delta, 0, MAXQ)];
-      break;
+    case AOM_BITS_8: return ac_qlookup[clamp(qindex + delta, 0, MAXQ)];
+    case AOM_BITS_10: return ac_qlookup_10[clamp(qindex + delta, 0, MAXQ)];
+    case AOM_BITS_12: return ac_qlookup_12[clamp(qindex + delta, 0, MAXQ)];
     default:
       assert(0 && "bit_depth should be AOM_BITS_8, AOM_BITS_10 or AOM_BITS_12");
       return -1;
   }
 #else
-  quant3 = ac_qlookup[clamp(qindex + delta, 0, MAXQ)];
+  return ac_qlookup[clamp(qindex + delta, 0, MAXQ)];
 #endif
-  if(scale < 0) {
-    quant = quant3 >> -scale;
-    if(quant < 4) quant = 4;
-  } else {
-    quant = quant3 * (1 << scale);
-  }
-  return quant;
 }
 
 /* Wat. */

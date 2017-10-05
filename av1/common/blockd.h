@@ -623,11 +623,9 @@ typedef struct macroblockd_plane {
   struct buf_2d pre[2];
   ENTROPY_CONTEXT *above_context;
   ENTROPY_CONTEXT *left_context;
-  int16_t seg_dequant[MAX_SEGMENTS][2];
-#if CONFIG_NEW_QUANT
-  dequant_val_type_nuq seg_dequant_nuq[MAX_SEGMENTS][QUANT_PROFILES]
-                                      [COEF_BANDS];
-#endif
+
+  // used only in dequantization, scaled for TX_COEFF_DEPTH
+  int16_t seg_dequantTX[MAX_SEGMENTS][2];
   uint8_t *color_index_map;
 
   // number of 4x4s in current block
@@ -641,11 +639,8 @@ typedef struct macroblockd_plane {
   qm_val_t *seg_iqmatrix[MAX_SEGMENTS][2][TX_SIZES_ALL];
   qm_val_t *seg_qmatrix[MAX_SEGMENTS][2][TX_SIZES_ALL];
 #endif
-  // encoder
-  const int16_t *dequant;
-#if CONFIG_NEW_QUANT
-  const dequant_val_type_nuq *dequant_val_nuq[QUANT_PROFILES];
-#endif  // CONFIG_NEW_QUANT
+  // used only in encoder for various RDO decisiomaking, original Q3(D11)
+  const int16_t *dequant3;
 
 #if CONFIG_PVQ || CONFIG_DIST_8X8
   DECLARE_ALIGNED(16, int16_t, pred[MAX_SB_SQUARE]);

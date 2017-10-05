@@ -1303,6 +1303,7 @@ static int do_tx_type_search(TX_TYPE tx_type, int prune) {
 #endif  // CONFIG_EXT_TX
 }
 
+// SSE is from pixel domain and scaled to Q2^2 
 static void model_rd_from_sse(const AV1_COMP *const cpi,
                               const MACROBLOCKD *const xd, BLOCK_SIZE bsize,
                               int plane, int64_t sse, int *rate,
@@ -1317,7 +1318,7 @@ static void model_rd_from_sse(const AV1_COMP *const cpi,
   // Fast approximate the modelling function.
   if (cpi->sf.simple_model_rd_from_var) {
     const int64_t square_error = sse;
-    int quantizer = (pd->dequant[1] >> dequant_shift);
+    int quantizer = (pd->dequant3[1] >> dequant_shift);
 
     if (quantizer < 120)
       *rate = (int)((square_error * (280 - quantizer)) >>
@@ -1327,7 +1328,7 @@ static void model_rd_from_sse(const AV1_COMP *const cpi,
     *dist = (square_error * quantizer) >> 8;
   } else {
     av1_model_rd_from_var_lapndz(sse, num_pels_log2_lookup[bsize],
-                                 pd->dequant[1] >> dequant_shift, rate, dist);
+                                 pd->dequant3[1] >> dequant_shift, rate, dist);
   }
 
   *dist <<= 4;
@@ -1395,8 +1396,8 @@ int64_t av1_block_error_c(const tran_low_t *coeff, const tran_low_t *dqcoeff,
 
   for (i = 0; i < block_size; i++) {
     const int diff = coeff[i] - dqcoeff[i];
-    error += diff * diff;
-    sqcoeff += coeff[i] * coeff[i];
+    error += (int64_t)diff * diff;
+    sqcoeff += (int64_t)coeff[i] * coeff[i];
   }
 
   *ssz = sqcoeff;
@@ -1409,35 +1410,12 @@ int64_t av1_block_error_fp_c(const int16_t *coeff, const int16_t *dqcoeff,
   int64_t error = 0;
 
   for (i = 0; i < block_size; i++) {
-    const int diff = coeff[i] - dqcoeff[i];
+    const int diff = (int64_t)coeff[i] - dqcoeff[i];
     error += diff * diff;
   }
 
   return error;
 }
-
-#if CONFIG_HIGHBITDEPTH
-int64_t av1_highbd_block_error_c(const tran_low_t *coeff,
-                                 const tran_low_t *dqcoeff, intptr_t block_size,
-                                 int64_t *ssz, int bd) {
-  int i;
-  int64_t error = 0, sqcoeff = 0;
-  int shift = 2 * (bd - 8);
-  int rounding = shift > 0 ? 1 << (shift - 1) : 0;
-
-  for (i = 0; i < block_size; i++) {
-    const int64_t diff = coeff[i] - dqcoeff[i];
-    error += diff * diff;
-    sqcoeff += (int64_t)coeff[i] * (int64_t)coeff[i];
-  }
-  assert(error >= 0 && sqcoeff >= 0);
-  error = (error + rounding) >> shift;
-  sqcoeff = (sqcoeff + rounding) >> shift;
-
-  *ssz = sqcoeff;
-  return error;
-}
-#endif  // CONFIG_HIGHBITDEPTH
 
 #if CONFIG_PVQ
 // Without PVQ, av1_block_error_c() return two kind of errors,
@@ -1449,32 +1427,6 @@ int64_t av1_highbd_block_error_c(const tran_low_t *coeff,
 // is required to derive the residue signal,
 // i.e. coeff - ref = residue (all transformed).
 
-#if CONFIG_HIGHBITDEPTH
-static int64_t av1_highbd_block_error2_c(const tran_low_t *coeff,
-                                         const tran_low_t *dqcoeff,
-                                         const tran_low_t *ref,
-                                         intptr_t block_size, int64_t *ssz,
-                                         int bd) {
-  int64_t error;
-  int64_t sqcoeff;
-  int shift = 2 * (bd - 8);
-  int rounding = shift > 0 ? 1 << (shift - 1) : 0;
-  // Use the existing sse codes for calculating distortion of decoded signal:
-  // i.e. (orig - decoded)^2
-  // For high bit depth, throw away ssz until a 32-bit version of
-  // av1_block_error_fp is written.
-  int64_t ssz_trash;
-  error = av1_block_error(coeff, dqcoeff, block_size, &ssz_trash);
-  // prediction residue^2 = (orig - ref)^2
-  sqcoeff = av1_block_error(coeff, ref, block_size, &ssz_trash);
-  error = (error + rounding) >> shift;
-  sqcoeff = (sqcoeff + rounding) >> shift;
-  *ssz = sqcoeff;
-  return error;
-}
-#else
-// TODO(yushin) : Since 4x4 case does not need ssz, better to refactor into
-// a separate function that does not do the extra computations for ssz.
 static int64_t av1_block_error2_c(const tran_low_t *coeff,
                                   const tran_low_t *dqcoeff,
                                   const tran_low_t *ref, intptr_t block_size,
@@ -1487,7 +1439,6 @@ static int64_t av1_block_error2_c(const tran_low_t *coeff,
   *ssz = av1_block_error_fp(coeff, ref, block_size);
   return error;
 }
-#endif  // CONFIG_HIGHBITDEPTH
 #endif  // CONFIG_PVQ
 
 #if !CONFIG_PVQ || CONFIG_VAR_TX
@@ -1821,34 +1772,21 @@ void av1_dist_block(const AV1_COMP *cpi, MACROBLOCK *x, int plane,
     // not involve an inverse transform, but it is less accurate.
     const int buffer_length = tx_size_2d[tx_size];
     int64_t this_sse;
-    int shift = (MAX_TX_SCALE - av1_get_tx_scale(tx_size)) * 2;
+    // need to shift down to Q2/D10
+    int depth_shift = (TX_COEFF_DEPTH - 10)*2;
+    int depth_round = depth_shift > 1 ? (1 << (depth_shift - 1)) : 0;
     tran_low_t *const coeff = BLOCK_OFFSET(p->coeff, block);
     tran_low_t *const dqcoeff = BLOCK_OFFSET(pd->dqcoeff, block);
 #if CONFIG_PVQ
     tran_low_t *ref_coeff = BLOCK_OFFSET(pd->pvq_ref_coeff, block);
 
-#if CONFIG_HIGHBITDEPTH
-    const int bd = (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH) ? xd->bd : 8;
-    *out_dist = av1_highbd_block_error2_c(coeff, dqcoeff, ref_coeff,
-                                          buffer_length, &this_sse, bd) >>
-                shift;
-#else
-    *out_dist = av1_block_error2_c(coeff, dqcoeff, ref_coeff, buffer_length,
-                                   &this_sse) >>
-                shift;
-#endif  // CONFIG_HIGHBITDEPTH
+    *out_dist = (av1_block_error2_c(coeff, dqcoeff, ref_coeff, buffer_length,
+                                    &this_sse) + depth_round) >> depth_shift;
 #else   // !CONFIG_PVQ
-#if CONFIG_HIGHBITDEPTH
-    if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH)
-      *out_dist = av1_highbd_block_error(coeff, dqcoeff, buffer_length,
-                                         &this_sse, xd->bd) >>
-                  shift;
-    else
-#endif
-      *out_dist =
-          av1_block_error(coeff, dqcoeff, buffer_length, &this_sse) >> shift;
+    *out_dist = (av1_block_error(coeff, dqcoeff, buffer_length, &this_sse)
+                 + depth_round) >> depth_shift;
 #endif  // CONFIG_PVQ
-    *out_sse = this_sse >> shift;
+    *out_sse = (this_sse + depth_round) >> depth_shift;
   } else {
     const BLOCK_SIZE tx_bsize = txsize_to_bsize[tx_size];
 #if !CONFIG_PVQ || CONFIG_DIST_8X8
@@ -2013,20 +1951,15 @@ static void block_rd_txfm(int plane, int block, int blk_row, int blk_col,
   av1_xform_quant(cm, x, plane, block, blk_row, blk_col, plane_bsize, tx_size,
                   coeff_ctx, AV1_XFORM_QUANT_FP);
 
-  const int shift = (MAX_TX_SCALE - av1_get_tx_scale(tx_size)) * 2;
+  int depth_shift = (TX_COEFF_DEPTH - 10)*2;
+  int depth_round = depth_shift > 1 ? (1 << (depth_shift - 1)) : 0;
   tran_low_t *const coeff = BLOCK_OFFSET(x->plane[plane].coeff, block);
   tran_low_t *const dqcoeff = BLOCK_OFFSET(xd->plane[plane].dqcoeff, block);
   const int buffer_length = tx_size_2d[tx_size];
   int64_t tmp_dist;
   int64_t tmp;
-#if CONFIG_HIGHBITDEPTH
-  if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH)
-    tmp_dist =
-        av1_highbd_block_error(coeff, dqcoeff, buffer_length, &tmp, xd->bd) >>
-        shift;
-  else
-#endif
-    tmp_dist = av1_block_error(coeff, dqcoeff, buffer_length, &tmp) >> shift;
+  tmp_dist = (av1_block_error(coeff, dqcoeff, buffer_length, &tmp) +
+              depth_round) >> depth_shift;
 
   if (
 #if CONFIG_DIST_8X8
@@ -4501,19 +4434,14 @@ void av1_tx_block_rd_b(const AV1_COMP *cpi, MACROBLOCK *x, TX_SIZE tx_size,
   av1_xform_quant(cm, x, plane, block, blk_row, blk_col, plane_bsize, tx_size,
                   coeff_ctx, AV1_XFORM_QUANT_FP);
 
-  const int shift = (MAX_TX_SCALE - av1_get_tx_scale(tx_size)) * 2;
+  int depth_shift = (TX_COEFF_DEPTH - 10)*2;
+  int depth_round = depth_shift > 1 ? (1 << (depth_shift - 1)) : 0;
   tran_low_t *const coeff = BLOCK_OFFSET(p->coeff, block);
   const int buffer_length = tx_size_2d[tx_size];
   int64_t tmp_dist, tmp_sse;
-#if CONFIG_HIGHBITDEPTH
-  if (xd->cur_buf->flags & YV12_FLAG_HIGHBITDEPTH)
-    tmp_dist = av1_highbd_block_error(coeff, dqcoeff, buffer_length, &tmp_sse,
-                                      xd->bd) >>
-               shift;
-  else
-#endif
-    tmp_dist =
-        av1_block_error(coeff, dqcoeff, buffer_length, &tmp_sse) >> shift;
+  tmp_dist =
+    (av1_block_error(coeff, dqcoeff, buffer_length, &tmp_sse) +
+     depth_round) >> depth_shift;
 
 #if CONFIG_MRC_TX
   if (tx_type == MRC_DCT && !xd->mi[0]->mbmi.valid_mrc_mask) {
@@ -4530,8 +4458,8 @@ void av1_tx_block_rd_b(const AV1_COMP *cpi, MACROBLOCK *x, TX_SIZE tx_size,
                    a, l);
   } else {
     rd_stats->rate += rd_stats->zero_rate;
-    rd_stats->dist += tmp_sse >> shift;
-    rd_stats->sse += tmp_sse >> shift;
+    rd_stats->dist += (tmp_sse + depth_round) >> depth_shift;
+    rd_stats->sse += (tmp_sse + depth_round) >> depth_shift;
     rd_stats->skip = 1;
     rd_stats->invalid_rate = 1;
     return;
