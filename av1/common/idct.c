@@ -22,6 +22,9 @@
 #if CONFIG_DAALA_TX4 || CONFIG_DAALA_TX8 || CONFIG_DAALA_TX16 || \
     CONFIG_DAALA_TX32 || CONFIG_DAALA_TX64
 #include "av1/common/daala_tx.h"
+#if CONFIG_DAALA_TX
+#include "av1/common/daala_inv_txfm.h"
+#endif
 #endif
 
 int av1_get_tx_scale(const TX_SIZE tx_size) {
@@ -3149,7 +3152,7 @@ static void init_txfm_param(const MACROBLOCKD *xd, int plane, TX_SIZE tx_size,
 #endif
 }
 
-#if !CONFIG_TXMG
+#if !CONFIG_TXMG && !CONFIG_DAALA_TX
 typedef void (*InvTxfmFunc)(const tran_low_t *dqcoeff, uint8_t *dst, int stride,
                             TxfmParam *txfm_param);
 
@@ -3187,6 +3190,9 @@ void av1_inverse_transform_block(const MACROBLOCKD *xd,
   assert(av1_ext_tx_used[txfm_param.tx_set_type][txfm_param.tx_type]);
 
   const int is_hbd = get_bitdepth_data_path_index(xd);
+#if CONFIG_DAALA_TX
+  daala_inv_txfm_add(dqcoeff, dst, stride, &txfm_param, is_hbd);
+#else
 #if CONFIG_TXMG
   if (is_hbd) {
     av1_highbd_inv_txfm_add(dqcoeff, dst, stride, &txfm_param);
@@ -3213,6 +3219,7 @@ void av1_inverse_transform_block(const MACROBLOCKD *xd,
 #else  // CONFIG_TXMG
   inv_txfm_func[is_hbd](dqcoeff, dst, stride, &txfm_param);
 #endif  // CONFIG_TXMG
+#endif
 }
 
 void av1_inverse_transform_block_facade(MACROBLOCKD *xd, int plane, int block,
