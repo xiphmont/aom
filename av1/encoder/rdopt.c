@@ -51,7 +51,11 @@
 #if CONFIG_LV_MAP
 #include "av1/encoder/encodetxb.h"
 #endif
+#if CONFIG_DAALA_TX
+#include "av1/encoder/daala_fwd_txfm.h"
+#else
 #include "av1/encoder/hybrid_fwd_txfm.h"
+#endif
 #include "av1/encoder/mcomp.h"
 #include "av1/encoder/palette.h"
 #include "av1/encoder/ratectrl.h"
@@ -4910,6 +4914,9 @@ static int predict_skip_flag(const MACROBLOCK *x, BLOCK_SIZE bsize) {
   param.tx_set_type = get_ext_tx_set_type(param.tx_size, plane_bsize,
                                           is_inter_block(&xd->mi[0]->mbmi), 0);
 
+#if CONFIG_DAALA_TX
+  daala_fwd_txfm(p->src_diff, DCT_coefs, bw, &param);
+#else
 #if CONFIG_TXMG
   av1_highbd_fwd_txfm(p->src_diff, DCT_coefs, bw, &param);
 #else   // CONFIG_TXMG
@@ -4918,6 +4925,7 @@ static int predict_skip_flag(const MACROBLOCK *x, BLOCK_SIZE bsize) {
   else
     av1_fwd_txfm(p->src_diff, DCT_coefs, bw, &param);
 #endif  // CONFIG_TXMG
+#endif
 
   uint32_t dc = (uint32_t)av1_dc_quant(x->qindex, 0, xd->bd);
   uint32_t ac = (uint32_t)av1_ac_quant(x->qindex, 0, xd->bd);
