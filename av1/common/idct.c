@@ -1697,9 +1697,9 @@ void av1_iht16x32_512_add_c(const tran_low_t *input, uint8_t *dest, int stride,
   for (i = 0; i < n2; ++i) {
 #if CONFIG_DAALA_TX16 && CONFIG_DAALA_TX32
     tran_low_t temp_in[16];
-    for (j = 0; j < n; j++) temp_in[j] = input[j] * 2;
+    for (j = 0; j < n; j++) temp_in[j] = input[j] * 4;
     IHT_16x32[tx_type].rows(temp_in, outtmp);
-    for (j = 0; j < n; ++j) tmp[j][i] = outtmp[j] * 4;
+    for (j = 0; j < n; ++j) tmp[j][i] = outtmp[j];
 #else
     IHT_16x32[tx_type].rows(input, outtmp);
     for (j = 0; j < n; ++j)
@@ -1719,7 +1719,7 @@ void av1_iht16x32_512_add_c(const tran_low_t *input, uint8_t *dest, int stride,
       int d = i * stride + j;
       int s = j * outstride + i;
 #if CONFIG_DAALA_TX16 && CONFIG_DAALA_TX32
-      dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 5));
+      dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 4));
 #else
       dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 6));
 #endif
@@ -1785,9 +1785,9 @@ void av1_iht32x16_512_add_c(const tran_low_t *input, uint8_t *dest, int stride,
   for (i = 0; i < n; ++i) {
 #if CONFIG_DAALA_TX16 && CONFIG_DAALA_TX32
     tran_low_t temp_in[32];
-    for (j = 0; j < n2; j++) temp_in[j] = input[j] * 2;
+    for (j = 0; j < n2; j++) temp_in[j] = input[j] * 4;
     IHT_32x16[tx_type].rows(temp_in, outtmp);
-    for (j = 0; j < n2; ++j) tmp[j][i] = outtmp[j] * 4;
+    for (j = 0; j < n2; ++j) tmp[j][i] = outtmp[j];
 #else
     IHT_32x16[tx_type].rows(input, outtmp);
     for (j = 0; j < n2; ++j)
@@ -1807,7 +1807,7 @@ void av1_iht32x16_512_add_c(const tran_low_t *input, uint8_t *dest, int stride,
       int d = i * stride + j;
       int s = j * outstride + i;
 #if CONFIG_DAALA_TX16 && CONFIG_DAALA_TX32
-      dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 5));
+      dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 4));
 #else
       dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 6));
 #endif
@@ -2070,7 +2070,7 @@ void av1_iht32x32_1024_add_c(const tran_low_t *input, uint8_t *dest, int stride,
   for (i = 0; i < 32; ++i) {
 #if CONFIG_DAALA_TX32
     tran_low_t temp_in[32];
-    for (j = 0; j < 32; j++) temp_in[j] = input[j] * 2;
+    for (j = 0; j < 32; j++) temp_in[j] = input[j] * 4;
     IHT_32[tx_type].rows(temp_in, out[i]);
 #else
     IHT_32[tx_type].rows(input, out[i]);
@@ -2079,15 +2079,8 @@ void av1_iht32x32_1024_add_c(const tran_low_t *input, uint8_t *dest, int stride,
   }
 
   // transpose
-  for (i = 0; i < 32; i++) {
-    for (j = 0; j < 32; j++) {
-#if CONFIG_DAALA_TX32
-      tmp[j][i] = out[i][j] * 4;
-#else
-      tmp[j][i] = out[i][j];
-#endif
-    }
-  }
+  for (i = 0; i < 32; i++)
+    for (j = 0; j < 32; j++) tmp[j][i] = out[i][j];
 
   // inverse transform column vectors
   for (i = 0; i < 32; ++i) IHT_32[tx_type].cols(tmp[i], out[i]);
@@ -2100,7 +2093,7 @@ void av1_iht32x32_1024_add_c(const tran_low_t *input, uint8_t *dest, int stride,
       int d = i * stride + j;
       int s = j * outstride + i;
 #if CONFIG_DAALA_TX32
-      dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 5));
+      dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 4));
 #else
       dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 6));
 #endif
@@ -2166,7 +2159,7 @@ void av1_iht64x64_4096_add_c(const tran_low_t *input, uint8_t *dest, int stride,
   for (i = 0; i < 64; ++i) {
 #if CONFIG_DAALA_TX64
     tran_low_t temp_in[64];
-    for (j = 0; j < 64; j++) temp_in[j] = input[j] * 2;
+    for (j = 0; j < 64; j++) temp_in[j] = input[j] * 8;
     IHT_64[tx_type].rows(temp_in, out[i]);
 // Do not rescale intermediate for Daala
 #else
@@ -2194,7 +2187,7 @@ void av1_iht64x64_4096_add_c(const tran_low_t *input, uint8_t *dest, int stride,
       int d = i * stride + j;
       int s = j * outstride + i;
 #if CONFIG_DAALA_TX64
-      dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 2));
+      dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 4));
 #else
       dest[d] = clip_pixel_add(dest[d], ROUND_POWER_OF_TWO(outp[s], 5));
 #endif
