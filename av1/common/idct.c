@@ -63,7 +63,7 @@ static void iidtx32_c(const tran_low_t *input, tran_low_t *output) {
   }
 }
 
-#if CONFIG_TX64X64
+#if CONFIG_TX64X64 && !CONFIG_DAALA_TX64
 static void iidtx64_c(const tran_low_t *input, tran_low_t *output) {
   int i;
   for (i = 0; i < 64; ++i) {
@@ -87,7 +87,7 @@ static void ihalfright32_c(const tran_low_t *input, tran_low_t *output) {
   // Note overall scaling factor is 4 times orthogonal
 }
 
-#if CONFIG_TX64X64
+#if CONFIG_TX64X64 && !CONFIG_DAALA_TX64
 static void idct64_col_c(const tran_low_t *input, tran_low_t *output) {
   int32_t in[64], out[64];
   int i;
@@ -121,6 +121,8 @@ static void ihalfright64_c(const tran_low_t *input, tran_low_t *output) {
 #endif  // CONFIG_TX64X64
 
 // Inverse identity transform and add.
+#if (!CONFIG_DAALA_TX4 && !CONFIG_DAALA_TX8 && !CONFIG_DAALA_TX16 \
+     && !CONFIG_DAALA_TX32 && !CONFIG_DAALA_TX64)
 static void inv_idtx_add_c(const tran_low_t *input, uint8_t *dest, int stride,
                            int bsx, int bsy, TX_TYPE tx_type) {
   int r, c;
@@ -135,6 +137,7 @@ static void inv_idtx_add_c(const tran_low_t *input, uint8_t *dest, int stride,
     }
   }
 }
+#endif
 
 #define FLIPUD_PTR(dest, stride, size)       \
   do {                                       \
@@ -2531,13 +2534,12 @@ static void inv_txfm_add_4x4(const tran_low_t *input, uint8_t *dest, int stride,
     av1_iwht4x4_add(input, dest, stride, txfm_param);
     return;
   }
-
-  switch (tx_type) {
-#if !CONFIG_DAALA_TX4
-    case DCT_DCT: av1_idct4x4_add(input, dest, stride, txfm_param); break;
+#if CONFIG_DAALA_TX4
+  (void)tx_type;
+  av1_iht4x4_16_add_c(input, dest, stride, txfm_param);
 #else
-    case DCT_DCT:
-#endif
+  switch (tx_type) {
+    case DCT_DCT: av1_idct4x4_add(input, dest, stride, txfm_param); break;
     case ADST_DCT:
     case DCT_ADST:
     case ADST_ADST: av1_iht4x4_16_add(input, dest, stride, txfm_param); break;
@@ -2560,6 +2562,7 @@ static void inv_txfm_add_4x4(const tran_low_t *input, uint8_t *dest, int stride,
     case IDTX: inv_idtx_add_c(input, dest, stride, 4, 4, tx_type); break;
     default: assert(0); break;
   }
+#endif
 }
 
 static void inv_txfm_add_4x8(const tran_low_t *input, uint8_t *dest, int stride,
@@ -2677,13 +2680,12 @@ static void inv_txfm_add_64x32(const tran_low_t *input, uint8_t *dest,
 
 static void inv_txfm_add_8x8(const tran_low_t *input, uint8_t *dest, int stride,
                              const TxfmParam *txfm_param) {
+#if CONFIG_DAALA_TX8
+  av1_iht8x8_64_add_c(input, dest, stride, txfm_param);
+#else
   const TX_TYPE tx_type = txfm_param->tx_type;
   switch (tx_type) {
-#if !CONFIG_DAALA_TX8
     case DCT_DCT: idct8x8_add(input, dest, stride, txfm_param); break;
-#else
-    case DCT_DCT:
-#endif
     case ADST_DCT:
     case DCT_ADST:
     case ADST_ADST: av1_iht8x8_64_add(input, dest, stride, txfm_param); break;
@@ -2706,17 +2708,17 @@ static void inv_txfm_add_8x8(const tran_low_t *input, uint8_t *dest, int stride,
     case IDTX: inv_idtx_add_c(input, dest, stride, 8, 8, tx_type); break;
     default: assert(0); break;
   }
+#endif
 }
 
 static void inv_txfm_add_16x16(const tran_low_t *input, uint8_t *dest,
                                int stride, const TxfmParam *txfm_param) {
+#if CONFIG_DAALA_TX16
+  av1_iht16x16_256_add_c(input, dest, stride, txfm_param);
+#else
   const TX_TYPE tx_type = txfm_param->tx_type;
   switch (tx_type) {
-#if !CONFIG_DAALA_TX16
     case DCT_DCT: idct16x16_add(input, dest, stride, txfm_param); break;
-#else
-    case DCT_DCT:
-#endif
     case ADST_DCT:
     case DCT_ADST:
     case ADST_ADST:
@@ -2741,19 +2743,17 @@ static void inv_txfm_add_16x16(const tran_low_t *input, uint8_t *dest,
 #endif  // CONFIG_MRC_TX
     default: assert(0); break;
   }
+#endif
 }
 
 static void inv_txfm_add_32x32(const tran_low_t *input, uint8_t *dest,
                                int stride, const TxfmParam *txfm_param) {
+#if CONFIG_DAALA_TX32
+  av1_iht32x32_1024_add_c(input, dest, stride, txfm_param);
+#else
   const TX_TYPE tx_type = txfm_param->tx_type;
   switch (tx_type) {
-#if !CONFIG_DAALA_TX32
     case DCT_DCT: idct32x32_add(input, dest, stride, txfm_param); break;
-#else
-    case DCT_DCT:
-      av1_iht32x32_1024_add_c(input, dest, stride, txfm_param);
-      break;
-#endif
     case ADST_DCT:
     case DCT_ADST:
     case ADST_ADST:
@@ -2776,19 +2776,19 @@ static void inv_txfm_add_32x32(const tran_low_t *input, uint8_t *dest,
 #endif  // CONFIG_MRC_TX
     default: assert(0); break;
   }
+#endif
 }
 
 #if CONFIG_TX64X64
 static void inv_txfm_add_64x64(const tran_low_t *input, uint8_t *dest,
                                int stride, const TxfmParam *txfm_param) {
+#if CONFIG_DAALA_TX64
+  av1_iht64x64_4096_add_c(input, dest, stride, txfm_param);
+#else
   const TX_TYPE tx_type = txfm_param->tx_type;
   assert(tx_type == DCT_DCT);
   switch (tx_type) {
-#if !CONFIG_DAALA_TX64
     case DCT_DCT: idct64x64_add(input, dest, stride, txfm_param); break;
-#else
-    case DCT_DCT:
-#endif
     case ADST_DCT:
     case DCT_ADST:
     case ADST_ADST:
@@ -2811,6 +2811,7 @@ static void inv_txfm_add_64x64(const tran_low_t *input, uint8_t *dest,
 #endif  // CONFIG_MRC_TX
     default: assert(0); break;
   }
+#endif
 }
 #endif  // CONFIG_TX64X64
 
